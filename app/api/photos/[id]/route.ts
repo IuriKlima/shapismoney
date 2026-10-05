@@ -1,0 +1,3 @@
+import {getChatGPTUser} from '../../../chatgpt-auth';
+import {bucket} from '../../../../lib/storage';
+export async function GET(_req:Request,context:{params:Promise<{id:string}>}){const user=await getChatGPTUser();if(!user)return new Response(null,{status:401});const {id}=await context.params;if(!/^[a-f0-9-]{36}$/.test(id))return new Response(null,{status:404});try{const image=await bucket().get(user.userId+'/'+id);if(!image)return new Response(null,{status:404});return new Response(image.body,{headers:{'Content-Type':image.httpMetadata?.contentType||'image/jpeg','Cache-Control':'private, max-age=3600','X-Content-Type-Options':'nosniff'}});}catch{return new Response(null,{status:503});}}
