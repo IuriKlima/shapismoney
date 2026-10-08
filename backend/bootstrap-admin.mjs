@@ -13,7 +13,7 @@ export async function runBootstrap({argv=process.argv,env=process.env,input=proc
     store=postgresStore(poolFromEnvironment(env));await verifyRuntimeRole(store);
     if(await store.get("SELECT id FROM users WHERE role='admin' LIMIT 1"))throw new BootstrapFailure('Já existe administrador. Bootstrap inicial recusado.');
     reader=createInterface({input,output});
-    output.write('Bootstrap manual de instalação vazia. Não cria personal/nutri/aluno, não redefine senha e não altera administrador existente.\n');
+    output.write('Bootstrap manual de instalação vazia. Cria administrador com gestão de alunos e treino na própria organização. Não cria conta personal/nutri/aluno, não concede atos de nutrição e não redefine acessos existentes.\n');
     const organizationName=await reader.question('Nome da organização: '),name=await reader.question('Nome do administrador: '),email=await reader.question('E-mail do administrador: ');
     const confirmation=await reader.question('Para autorizar esta criação, digite CRIAR ADMINISTRADOR INICIAL: ');reader.close();reader=null;
     if(confirmation!=='CRIAR ADMINISTRADOR INICIAL')throw new BootstrapFailure('Criação não confirmada.');

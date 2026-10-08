@@ -47,3 +47,44 @@ test('PostgreSQL embarcado: bootstrap com papel limitado cria/audita e recusa ad
     const input={store,email:'initial@bootstrap.example.test',name:'Administrador Fictício PG',organizationName:'Fictícia PG',password:FIXTURE_PASSWORD,confirmation:'CRIAR ADMINISTRADOR INICIAL'};const result=await provisionInitialAdmin(input);assert.equal(result.role,'admin');assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users')).n,1);assert.equal((await store.get("SELECT COUNT(*)::integer AS n FROM audit WHERE event='bootstrap.admin.created'")).n,1);await assert.rejects(()=>provisionInitialAdmin(input),/Já existe administrador/);await verifyRuntimeRole(store);
   }finally{await store.close();}
 });
+
+test('PostgreSQL limitado: admin cadastra/onboarda/publica treino, sem acesso a outra organização',async()=>{
+  const {db,store}=await embedded();await migratePostgres(store);
+  const org=randomUUID(),externalOrg=randomUUID(),admin=randomUUID(),externalAdmin=randomUUID();
+  const hash=await hashPassword(FIXTURE_PASSWORD);
+  await store.transaction(async()=>{
+    for(const [id,name] of [[org,'Organização teste'],[externalOrg,'Outra organização teste']])await store.run('INSERT INTO organizations VALUES (?,?)',id,name);
+    for(const [id,tenant,email] of [[admin,org,'admin@fixture.invalid'],[externalAdmin,externalOrg,'externaladmin@fixture.invalid']])await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,tenant,email,'Admin fictício','admin',hash);
+  });
+  await db.exec('SET ROLE sim_app');
+  const app=await createLocalServer({store,loginLimit:20});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+  const origin='http://127.0.0.1:'+app.server.address().port;
+  const client=()=>{let cookie='';return {async request(path,body,method='POST',key=randomUUID()){
+    const response=await fetch(origin+'/api/local/'+path,{method:body===undefined?'GET':method,headers:{Origin:origin,'Content-Type':'application/json','Idempotency-Key':key,...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+    if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];return {status:response.status,data:await response.json()};
+  }};};
+  try{
+    const owner=client(),external=client();
+    for(const [who,email] of [[owner,'admin@fixture.invalid'],[external,'externaladmin@fixture.invalid']])assert.equal((await who.request('login',{email,password:FIXTURE_PASSWORD})).status,200);
+    const input={name:'Aluno fictício admin PG',email:'adminstudent@fixture.invalid',internalNote:'Registro administrativo'},key=randomUUID();
+    const repeated=await Promise.all([owner.request('students',input,'POST',key),owner.request('students',input,'POST',key)]);
+    assert.deepEqual(repeated[0],repeated[1]);assert.equal(repeated[0].status,201);assert.equal(repeated[0].data.accountProvisioned,false);
+    const student=repeated[0].data.student;
+    assert.equal((await external.request('students/'+student.id)).status,404);
+    const onboarding={goal:'Hipertrofia',days:3,experience:'Iniciante',context:'Resposta fictícia registrada',revision:student.revision};
+    assert.equal((await external.request('students/'+student.id+'/onboarding',onboarding,'PUT')).status,404);
+    assert.equal((await owner.request('students/'+student.id+'/onboarding',onboarding,'PUT')).status,200);
+    assert.equal((await owner.request('students/'+student.id+'/onboarding',onboarding,'PUT')).status,409);
+    let plan=(await owner.request('students/'+student.id+'/plans',{title:'Treino manual PG',exercises:[{name:'Exemplo',sets:3,reps:10}]})).data.plan;
+    assert.equal((await owner.request('plans/'+plan.id+'/publish',{revision:plan.revision})).status,409);
+    for(const action of ['submit','approve','publish']){
+      assert.equal((await external.request('plans/'+plan.id+'/'+action,{revision:plan.revision})).status,404);
+      const result=await owner.request('plans/'+plan.id+'/'+action,{revision:plan.revision});assert.equal(result.status,200);plan=result.data.plan;
+    }
+    assert.equal(plan.status,'published');
+    assert.equal((await owner.request('ai',{scenario:'method',syntheticConsent:true})).status,403);
+    assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users')).n,2);
+    await assert.rejects(()=>store.query('CREATE TABLE forbidden_admin_test(id INTEGER)'));
+    await assert.rejects(()=>store.run('DELETE FROM schema_migrations'));
+  }finally{await app.close();}
+});

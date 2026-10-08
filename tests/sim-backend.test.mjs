@@ -57,3 +57,43 @@ test('migration sem conta automática; SQLite vazio não provisiona administrado
 test('adaptador local e servidor recusam produção inclusive quando importados',async()=>{
   const previous=process.env.NODE_ENV;process.env.NODE_ENV='production';try{assert.throws(()=>openLocalStore(':memory:'),/refuses production/);await assert.rejects(()=>createLocalServer({filename:':memory:'}),/refuses production/);}finally{if(previous===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=previous;}
 });
+
+test('admin gere cadastro, onboarding e treino somente na própria organização, sem papéis profissionais implícitos',async()=>withFixture(async f=>{
+  const admin=f.client(),coach=f.client(),nutrition=f.client(),student=f.client(),outsider=f.client(),otherCoach=f.client();
+  for(const [client,role] of [[admin,'admin'],[coach,'coach'],[nutrition,'nutrition'],[student,'student'],[outsider,'outsider'],[otherCoach,'otherCoach']])assert.equal((await client.login(role)).status,200);
+  const data={name:'Aluno admin fictício',email:'admin-created@fixture.invalid',internalNote:'Cadastro administrativo'};
+  const created=await admin.request('students',data);assert.equal(created.status,201);assert.equal(created.data.accountProvisioned,false);
+  const id=created.data.student.id;assert.equal(f.store.get('SELECT coach_id FROM students WHERE id=?',id).coach_id,f.ids.admin);
+  assert.equal(f.store.get('SELECT COUNT(*) AS n FROM users').n,7);
+  assert.equal((await admin.request('students',{...data,email:'another@fixture.invalid',role:'coach'})).status,400);
+  assert.equal((await admin.request('students',{...data,email:'another@fixture.invalid',org_id:'untrusted'})).status,400);
+  assert.equal((await coach.request('students/'+id)).status,404);
+  const external=await outsider.request('students',{...data,email:'external@fixture.invalid'});assert.equal(external.status,201);
+  for(const suffix of ['','/plans'])assert.equal((await admin.request('students/'+external.data.student.id+suffix)).status,404);
+  const onboarding={goal:'Condicionamento',days:3,experience:'Iniciante',context:'Informado pelo aluno fictício',revision:1};
+  const staffPath='students/'+f.ids.studentRecord+'/onboarding';
+  for(const [client,code] of [[nutrition,403],[student,403],[otherCoach,404],[outsider,404]])assert.equal((await client.request(staffPath,onboarding,'PUT')).status,code);
+  assert.equal((await admin.request('students/'+external.data.student.id+'/onboarding',onboarding,'PUT')).status,404);
+  assert.equal((await admin.request(staffPath,{...onboarding,role:'coach'},'PUT')).status,400);
+  assert.equal((await admin.request(staffPath,onboarding,'PUT')).status,200);
+  assert.equal((await admin.request(staffPath,onboarding,'PUT')).status,409);
+  const competing=await Promise.all([admin.request(staffPath,{...onboarding,revision:2},'PUT'),coach.request(staffPath,{...onboarding,revision:2},'PUT')]);
+  assert.deepEqual(competing.map(r=>r.status).sort(),[200,409]);
+  assert.equal((await admin.request('onboarding',{...onboarding,revision:3},'PUT')).status,403);
+  const input={title:'Treino administrativo fictício',exercises:[{name:'Exemplo manual',sets:3,reps:10}]};
+  assert.equal((await admin.request('students/'+external.data.student.id+'/plans',input)).status,404);
+  let plan=(await admin.request('students/'+f.ids.studentRecord+'/plans',input)).data.plan;assert.equal(plan.status,'draft');
+  assert.equal((await student.request('students/'+f.ids.studentRecord+'/plans')).data.plans.length,0);
+  assert.equal((await admin.request('plans/'+plan.id+'/publish',{revision:plan.revision})).status,409);
+  for(const action of ['submit','approve','publish']){
+    for(const [client,code] of [[nutrition,403],[student,403],[otherCoach,404],[outsider,404]])assert.equal((await client.request('plans/'+plan.id+'/'+action,{revision:plan.revision})).status,code);
+    const result=await admin.request('plans/'+plan.id+'/'+action,{revision:plan.revision});assert.equal(result.status,200);plan=result.data.plan;
+  }
+  assert.equal((await student.request('students/'+f.ids.studentRecord+'/plans')).data.plans[0].status,'published');
+  const wrongRevision=await admin.request('plans/'+plan.id+'/publish',{revision:1});assert.equal(wrongRevision.status,409);
+  assert.equal((await admin.request('ai',{scenario:'method',syntheticConsent:true})).status,403);
+  assert.equal((await admin.request('nutrition',{})).status,404);
+  const audit=(await admin.request('audit')).data.audit;assert.ok(audit.some(e=>e.actor_id===f.ids.admin&&e.event==='onboarding.recorded'));
+  assert.ok(audit.some(e=>e.actor_id===f.ids.admin&&e.event==='plan.publish'));
+  assert.ok(!audit.some(e=>e.student_id===external.data.student.id));
+},{loginLimit:40}));

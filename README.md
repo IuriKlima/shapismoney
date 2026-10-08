@@ -73,3 +73,10 @@ Referências de implementação: [Node 24 SQLite](https://nodejs.org/docs/latest
 O backend persistente oferece `/api/local/ai`, exigindo sessão válida e papel de personal/nutrição. O papel vem do banco, nunca do payload. O cliente escolhe somente exemplos sintéticos definidos no servidor; nenhum dado do CRM é enviado e nenhum plano/aluno é alterado. Para desenvolvimento, `dev:backend` lê `.env.local` apenas no processo servidor; `SIM_AI_ENABLED=false` é o padrão. Ao habilitar explicitamente com a chave dev já configurada, a UI usa Responses API real; erros permanecem erros. Testes automatizados usam provider mock, sem novas chamadas pagas. Produção não recebe automaticamente a chave dev; acesso e segredos de produção exigem handoff separado aprovado.
 
 Homologação HTTPS restrita: usar `SIM_DEPLOYMENT_STAGE=staging`, IPs exatos em `SIM_STAGING_CLIENT_IPS` e `SIM_PRODUCTION_REVIEWED=false`; mantém os requisitos de DB/proxy/cookies de produção. Ver [handoff](deploy/README.md) antes de autorizar produção ou provisionamento.
+
+
+## Administração de alunos e treino
+
+O administrador autenticado pode cadastrar alunos, registrar onboarding informado por eles e conduzir treino manual de rascunho até revisão, aprovação e publicação, somente na própria organização. O personal continua limitado aos seus alunos vinculados. O servidor verifica o papel na sessão; alterações de onboarding e treino exigem revisão atual e chave de idempotência, com auditoria. O onboarding direto do aluno continua restrito à própria conta.
+
+Cadastro não cria conta, senha ou convite para o aluno. O administrador não recebe papel de nutricionista nem acesso à IA profissional automaticamente. Provisionamento de contas de alunos/profissionais, convites, recuperação de senha, nutrição persistente e uploads seguem pendentes. Primeiro administrador continua exigindo bootstrap interativo e aprovação; não há seed ou conta automática.
