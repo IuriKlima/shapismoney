@@ -1,3 +1,4 @@
+import {supervisionFlow} from './supervision.mjs';
 import {anamnesisFlow} from './anamnesis.mjs';
 import {serviceFlow} from './service-sla.mjs';
 import {monthlyBudget} from './ai-monthly-budget.mjs';
@@ -74,6 +75,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
   const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student,audit});
+  const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student});
   const handle=async function handle(req,res){
@@ -99,6 +101,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
       const intakeResult=await intake.handle(actor,req,route);if(intakeResult)return send(intakeResult.status,intakeResult.data);
+      const supervisionResult=await supervision.handle(actor,req,route);if(supervisionResult)return send(supervisionResult.status,supervisionResult.data);
       const serviceResult=await sla.handle(actor,req,route);if(serviceResult)return send(serviceResult.status,serviceResult.data);
       const budgetResult=await budget.handle(actor,req,route);if(budgetResult)return send(budgetResult.status,budgetResult.data);
       const chatResult=await chatFlow.handle(actor,auth,req,route);if(chatResult)return send(chatResult.status,chatResult.data);

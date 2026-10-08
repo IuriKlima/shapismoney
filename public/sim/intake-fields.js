@@ -1,6 +1,6 @@
 // Original Google Form checked read-only 2026-10-08: 28 questions, 26 required.
 export const INTAKE_VERSION='BRUNO_FORM_V1';
-export const CONSENT_VERSION='SIM_INTAKE_PURPOSES_V1';
+export const CONSENT_VERSION='SIM_INTAKE_PURPOSES_V2';
 export const INTAKE_SOURCE='https://docs.google.com/forms/d/e/1FAIpQLSeDEB5JBxVCqJTPgeFLuB0BC0lBXfjqU2r9CnJlG8oAtQTdRw/viewform';
 export const INTAKE_FIELDS=[
  {

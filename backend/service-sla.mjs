@@ -28,5 +28,5 @@ export function serviceFlow({store,now,deny,exact,text,read,mutation,student,aud
   }
   return null;
  }
- return {handle,changed,start:startCase};
+ return {handle,changed,snapshot,start:startCase};
 }

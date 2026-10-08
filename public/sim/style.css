@@ -850,3 +850,6 @@
 #crm-section,#service-section{overflow-wrap:anywhere;}#crm-section form,#service-section form{display:block;min-width:0;max-width:100%;}#crm-section :is(input,select,textarea),#service-section :is(input,select,textarea){min-width:0;max-width:100%;}#crm-section .checkbox,#service-section .checkbox{align-items:flex-start;}#crm-section .btn,#service-section .btn{white-space:normal;max-width:100%;}@media(max-width:400px){#crm-section form>.btn,#service-section form>.btn{width:100%;}}
 
 .intake-form{display:block}.intake-form label{display:block;margin-bottom:18px}.intake-form input,.intake-form textarea{max-width:100%;min-width:0}.intake-form textarea{min-height:90px}.intake-form fieldset{min-width:0;margin:18px 0;padding:14px}.intake-form legend{overflow-wrap:anywhere}.intake-actions{display:flex;gap:12px;flex-wrap:wrap}@media(max-width:480px){.intake-actions .btn{width:100%}}
+
+.supervision-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}#supervision-section .note,#supervision-section p,#supervision-section summary{overflow-wrap:anywhere}#supervision-section textarea{width:100%;box-sizing:border-box}
+.team-shell .premium-mobile-nav{overflow-x:auto;justify-content:flex-start}.team-shell .premium-mobile-nav button{flex:0 0 76px}

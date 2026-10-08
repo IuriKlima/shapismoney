@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {rmSync} from 'node:fs';
 import {isolatedFixture,FIXTURE_PASSWORD} from './backend-fixtures.mjs';
 import {createLocalServer} from '../backend/server.mjs';
-import {INTAKE_VERSION} from '../public/sim/intake-fields.js';
+import {INTAKE_VERSION,CONSENT_VERSION} from '../public/sim/intake-fields.js';
 import {fullIntakeAnswers} from './intake-test-fixtures.mjs';
 
 test('integrated synthetic pilot: invite, original intake, SLA, reviewed training/nutrition, isolation, execution and mock-only budget',async()=>{
@@ -22,11 +22,11 @@ test('integrated synthetic pilot: invite, original intake, SLA, reviewed trainin
  assert.ok(!JSON.stringify((await ok(s.req(route))).student).includes('PRIVATE_SYNTHETIC_NOTE'));
  const own=(await ok(s.req(route))).student;await ok(s.req('onboarding',{goal:'Condicionamento',days:3,experience:'Iniciante',context:'Synthetic context',revision:own.revision},'PUT'));assert.equal(f.store.get('SELECT COUNT(*) n FROM service_cases').n,0);
  const intake=route+'/anamnesis',confirm=revision=>({version:INTAKE_VERSION,revision,confirmed:true});
- await ok(s.req(intake,{version:INTAKE_VERSION,revision:0,answers:{main_goal:'Synthetic draft'},consents:{training:true,nutrition:true}},'PUT'));await ok(s.req(intake+'/complete',confirm(1)),400);
+ await ok(s.req(intake,{version:INTAKE_VERSION,revision:0,answers:{main_goal:'Synthetic draft'},consentVersion:CONSENT_VERSION,consents:{training:true,nutrition:true}},'PUT'));await ok(s.req(intake+'/complete',confirm(1)),400);
  const answers={...fullIntakeAnswers(),weight_kg:80,letter:'Synthetic optional letter',personal_context:'PRIVATE_SYNTHETIC_NARRATIVE'};assert.equal(Object.keys(answers).length,28);
- await ok(s.req(intake,{version:INTAKE_VERSION,revision:1,answers,consents:{training:true,nutrition:true}},'PUT'));await ok(s.req(intake+'/complete',confirm(2)),201);
+ await ok(s.req(intake,{version:INTAKE_VERSION,revision:1,answers,consentVersion:CONSENT_VERSION,consents:{training:true,nutrition:true}},'PUT'));await ok(s.req(intake+'/complete',confirm(2)),201);
  const initial=f.store.get('SELECT * FROM service_cases WHERE student_id=?',id);assert.equal(initial.target_at-initial.started_at,48*3600000);assert.equal(initial.promised_at-initial.started_at,72*3600000);assert.equal((await ok(s.req(intake+'/complete',confirm(2)))).startedNow,false);
- assert.equal((await ok(a.req(intake))).anamnesis.answers,undefined);assert.ok(!JSON.stringify(await ok(a.req('crm'))).includes('PRIVATE_SYNTHETIC_NARRATIVE'));await ok(a.req(intake+'/review',confirm(2)),403);await ok(c.req(intake+'/review',confirm(2)));
+ assert.equal((await ok(a.req(intake))).anamnesis.answers.personal_context,'PRIVATE_SYNTHETIC_NARRATIVE');assert.ok(!JSON.stringify(await ok(a.req('crm'))).includes('PRIVATE_SYNTHETIC_NARRATIVE'));await ok(a.req(intake+'/review',confirm(2)),403);await ok(c.req(intake+'/review',confirm(2)));
  await ok(a.req('nutrition/credentials',{userId:f.ids.nutrition,registration:'SYNTHETIC TEST ONLY',verified:true,checkedRegistration:true,revision:0},'PUT'));
  assert.deepEqual(Object.keys((await ok(n.req(intake))).anamnesis.answers).sort(),['current_diet','fractures','injuries','restrictions']);
  const delivery={revision:initial.revision,status:'delivered',responsibleId:f.ids.coach,note:'Synthetic reviewed delivery',confirmed:true,reviewedOnboarding:true};await ok(a.req(route+'/service',delivery,'PUT'),409);clock+=1000;
