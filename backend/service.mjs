@@ -21,28 +21,28 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     return user?{user,hash:tokenHash(match[1])}:null;
   }
   async function student(actor,id){
-    const row=await store.get('SELECT * FROM students WHERE id=? AND org_id=?',id,actor.org_id);
+    const row=await store.get('SELECT s.*,c.role AS coach_role FROM students s JOIN users c ON c.id=s.coach_id WHERE s.id=? AND s.org_id=?',id,actor.org_id);
     if(!row||!(actor.role==='admin'||actor.role==='coach'&&row.coach_id===actor.id||actor.role==='nutrition'&&row.nutrition_id===actor.id||actor.role==='student'&&row.user_id===actor.id))deny(404,'Aluno não encontrado.');
     return row;
   }
-  function studentDTO(row,actor){const result={id:row.id,name:row.name,email:row.email,onboarding:JSON.parse(row.onboarding),revision:row.revision};if(actor.role!=='student')result.internalNote=row.internal_note;return result;}
+  function studentDTO(row,actor){const result={id:row.id,name:row.name,email:row.email,onboarding:JSON.parse(row.onboarding),revision:row.revision};if(actor.role!=='student')result.internalNote=row.internal_note;if(actor.role==='admin')result.assignments={coachId:row.coach_role==='coach'?row.coach_id:null,nutritionId:row.nutrition_id};return result;}
   function trainingManager(actor,row){if(actor.org_id!==row.org_id||!(actor.role==='admin'||actor.role==='coach'&&row.coach_id===actor.id))deny(403,'Treino exige administrador da organização ou personal responsável.');}
   async function list(actor){
-    if(actor.role==='admin')return await store.all('SELECT * FROM students WHERE org_id=? ORDER BY name',actor.org_id);
+    if(actor.role==='admin')return await store.all('SELECT s.*,c.role AS coach_role FROM students s JOIN users c ON c.id=s.coach_id WHERE s.org_id=? ORDER BY s.name',actor.org_id);
     const column={coach:'coach_id',nutrition:'nutrition_id',student:'user_id'}[actor.role];if(!column)deny(403,'Papel inválido.');
-    return await store.all('SELECT * FROM students WHERE org_id=? AND '+column+'=? ORDER BY name',actor.org_id,actor.id);
+    return await store.all('SELECT s.*,c.role AS coach_role FROM students s JOIN users c ON c.id=s.coach_id WHERE s.org_id=? AND s.'+column+'=? ORDER BY s.name',actor.org_id,actor.id);
   }
   async function mutation(actor,req,body,work){
     const key=req.headers['idempotency-key'];if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,80}$/.test(key))deny(400,'Chave de operação obrigatória.');
     const hash=createHash('sha256').update(req.method+' '+req.url+' '+JSON.stringify(body)).digest('hex');
-    return await store.transaction(async()=>{await store.lockActor(actor.id);const previous=await store.get('SELECT * FROM operations WHERE actor_id=? AND operation_key=?',actor.id,key);if(previous){if(previous.request_hash!==hash)deny(409,'Chave reutilizada para outro pedido.');return {status:previous.status,data:JSON.parse(previous.result)};}
+    return await store.transaction(async()=>{await store.lockActor(actor.id);const currentActor=await store.get('SELECT active,role,org_id FROM users WHERE id=?',actor.id);if(!currentActor?.active||currentActor.role!==actor.role||currentActor.org_id!==actor.org_id)deny(401,'Acesso mudou. Entre novamente.');const previous=await store.get('SELECT * FROM operations WHERE actor_id=? AND operation_key=?',actor.id,key);if(previous){if(previous.request_hash!==hash)deny(409,'Chave reutilizada para outro pedido.');return {status:previous.status,data:JSON.parse(previous.result)};}
       const result=await work();await store.run('INSERT INTO operations VALUES (?,?,?,?,?)',actor.id,key,hash,result.status,JSON.stringify(result.data));return result;});
   }
   async function saveOnboarding(actor,req,row,body,event){
     exact(body,['goal','days','experience','context','revision']);
     if(!['Hipertrofia','Condicionamento','Qualidade de vida'].includes(body.goal)||!Number.isInteger(body.days)||body.days<1||body.days>7||!['Iniciante','Intermediário','Avançado'].includes(body.experience))deny(400,'Respostas inválidas.');
     const context=text(body.context,0,1000);
-    return await mutation(actor,req,body,async()=>{const current=await student(actor,row.id);if(body.revision!==current.revision)deny(409,'Dados mudaram. Recarregue antes de salvar.');
+    return await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);const current=await student(actor,row.id);if(body.revision!==current.revision)deny(409,'Dados mudaram. Recarregue antes de salvar.');
       const updated=await store.run('UPDATE students SET onboarding=?,revision=revision+1 WHERE id=? AND org_id=? AND revision=?',JSON.stringify({goal:body.goal,days:body.days,experience:body.experience,context}),row.id,actor.org_id,body.revision);
       if(updated.changes!==1)deny(409,'Dados mudaram. Recarregue antes de salvar.');
       await audit(actor,row.id,event);return {status:200,data:{student:studentDTO(await student(actor,row.id),actor)}};});
@@ -82,6 +82,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         const body=await read(req);exact(body,[]);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
       if(route==='/api/local/invitations'&&req.method==='POST'){const result=await invites.create(actor,req);return send(result.status,result.data);}
+      if(route==='/api/local/professionals'&&req.method==='GET'){if(actor.role!=='admin')deny(403,'Equipe restrita ao administrador.');return send(200,{professionals:await store.all("SELECT id,name,role FROM users WHERE org_id=? AND active=1 AND role IN ('coach','nutrition') ORDER BY name",actor.org_id)});}
       if(route==='/api/local/students'&&req.method==='GET')return send(200,{students:(await list(actor)).map(row=>studentDTO(row,actor))});
       if(route==='/api/local/students'&&req.method==='POST'){
         if(!['admin','coach'].includes(actor.role))deny(403,'Cadastro exige administrador da organização ou personal responsável.');const body=await read(req);exact(body,['name','email','internalNote']);const name=text(body.name,2,100),address=email(body.email),note=text(body.internalNote,0,1000);
@@ -91,21 +92,40 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         if(actor.role!=='student')deny(403,'Onboarding pertence ao aluno.');const row=await store.get('SELECT * FROM students WHERE user_id=? AND org_id=?',actor.id,actor.org_id);if(!row)deny(404,'Vínculo de aluno pendente.');
         const result=await saveOnboarding(actor,req,row,await read(req),'onboarding.saved');return send(result.status,result.data);
       }
-      const studentMatch=/^\/api\/local\/students\/([a-f0-9-]{36})(\/plans|\/onboarding)?$/.exec(route);
+      const studentMatch=/^\/api\/local\/students\/([a-f0-9-]{36})(\/plans|\/onboarding|\/assignments)?$/.exec(route);
       if(studentMatch){const row=await student(actor,studentMatch[1]);
         if(!studentMatch[2]&&req.method==='GET')return send(200,{student:studentDTO(row,actor)});
+        if(studentMatch[2]==='/assignments'&&req.method==='PUT'){
+          if(actor.role!=='admin')deny(403,'Atribuição exige administrador da organização.');
+          const body=await read(req);exact(body,['coachId','nutritionId','revision']);
+          for(const id of [body.coachId,body.nutritionId])if(id!==null&&(typeof id!=='string'||! /^[a-f0-9-]{36}$/.test(id)))deny(400,'Profissional inválido.');
+          if(!Number.isInteger(body.revision)||body.revision<1)deny(400,'Revisão inválida.');
+          const result=await mutation(actor,req,body,async()=>{
+            await store.lockStudent(row.id);const current=await student(actor,row.id);
+            if(current.revision!==body.revision)deny(409,'Dados mudaram. Recarregue antes de atribuir.');
+            for(const [id,role] of [[body.coachId,'coach'],[body.nutritionId,'nutrition']])if(id!==null&&!await store.get('SELECT id FROM users WHERE id=? AND org_id=? AND role=? AND active=1',id,actor.org_id,role))deny(400,'Profissional ativo da mesma organização obrigatório.');
+            const coach=body.coachId||actor.id,nutrition=body.nutritionId;
+            const coachChanged=current.coach_id!==coach,nutritionChanged=current.nutrition_id!==nutrition;
+            if(!coachChanged&&!nutritionChanged)return {status:200,data:{student:studentDTO(current,actor),changed:false}};
+            const updated=await store.run('UPDATE students SET coach_id=?,nutrition_id=?,revision=revision+1 WHERE id=? AND org_id=? AND revision=?',coach,nutrition,row.id,actor.org_id,body.revision);
+            if(updated.changes!==1)deny(409,'Dados mudaram. Recarregue antes de atribuir.');
+            if(coachChanged){await store.run("UPDATE plans SET status='draft',approved_by=NULL,approved_revision=NULL,revision=revision+1 WHERE student_id=? AND status<>'published'",row.id);await audit(actor,row.id,'assignment.coach.changed:'+current.coach_id+'>'+coach);}
+            if(nutritionChanged)await audit(actor,row.id,'assignment.nutrition.changed:'+(current.nutrition_id||'none')+'>'+(nutrition||'none'));
+            return {status:200,data:{student:studentDTO(await student(actor,row.id),actor),changed:true}};
+          });return send(result.status,result.data);
+        }
         if(studentMatch[2]==='/onboarding'&&req.method==='PUT'){trainingManager(actor,row);const result=await saveOnboarding(actor,req,row,await read(req),'onboarding.recorded');return send(result.status,result.data);}
         if(studentMatch[2]==='/plans'&&req.method==='GET'){const plans=await store.all('SELECT * FROM plans WHERE student_id=?'+(actor.role==='student'?" AND status='published'":'')+' ORDER BY id DESC',row.id);return send(200,{plans:plans.map(publicPlan)});}
         if(studentMatch[2]==='/plans'&&req.method==='POST'){
           trainingManager(actor,row);const body=await read(req);exact(body,['title','exercises']);const title=text(body.title,2,100);if(!Array.isArray(body.exercises)||body.exercises.length<1||body.exercises.length>12)deny(400,'Use 1–12 exercícios.');
           const exercises=body.exercises.map(e=>{exact(e,['name','sets','reps']);if(!Number.isInteger(e.sets)||e.sets<1||e.sets>10||!Number.isInteger(e.reps)||e.reps<1||e.reps>50)deny(400,'Séries ou repetições inválidas.');return {name:text(e.name,2,100),sets:e.sets,reps:e.reps};});
-          const result=await mutation(actor,req,body,async()=>{const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};});return send(result.status,result.data);
+          const result=await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};});return send(result.status,result.data);
         }
       }
       const planMatch=/^\/api\/local\/plans\/([a-f0-9-]{36})\/(submit|approve|publish)$/.exec(route);
       if(planMatch&&req.method==='POST'){
         const plan=await store.get('SELECT * FROM plans WHERE id=?',planMatch[1]);if(!plan)deny(404,'Plano não encontrado.');const row=await student(actor,plan.student_id);trainingManager(actor,row);const body=await read(req);exact(body,['revision']);
-        const result=await mutation(actor,req,body,async()=>{const current=await store.get('SELECT * FROM plans WHERE id=?',plan.id);if(body.revision!==current.revision)deny(409,'Plano mudou. Recarregue.');
+        const result=await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const current=await store.get('SELECT * FROM plans WHERE id=?',plan.id);if(body.revision!==current.revision)deny(409,'Plano mudou. Recarregue.');
           const action=planMatch[2];const required={submit:'draft',approve:'review',publish:'approved'}[action];if(current.status!==required)deny(409,'Revisão profissional obrigatória antes de publicar.');
           let updated;
           if(action==='approve')updated=await store.run("UPDATE plans SET status='approved',approved_by=?,approved_revision=revision,revision=revision+1 WHERE id=? AND revision=? AND status=?",actor.id,plan.id,body.revision,required);

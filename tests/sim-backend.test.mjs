@@ -125,3 +125,43 @@ test('convites: expiração, substituição, profissional distinto e rate limit'
   for(let i=0;i<7;i++)assert.equal((await f.client().request('activate',{token:'x'.repeat(43),email:'no@fixture.invalid',password:FIXTURE_PASSWORD})).status,400);assert.equal((await f.client().request('activate',{token:'x'.repeat(43),email:'no@fixture.invalid',password:FIXTURE_PASSWORD})).status,429);
  },{now:()=>clock,loginLimit:40});
 });
+
+test('admin assigns active same-organization professionals, revokes old access and invalidates unpublished approval',async()=>withFixture(async f=>{
+  const admin=f.client(),coach=f.client(),replacement=f.client(),nutrition=f.client(),student=f.client(),outsider=f.client();
+  for(const [c,r] of [[admin,'admin'],[coach,'coach'],[replacement,'otherCoach'],[nutrition,'nutrition'],[student,'student'],[outsider,'outsider']])await c.login(r);
+  const roster=await admin.request('professionals');assert.equal(roster.status,200);assert.equal(roster.data.professionals.length,3);assert.ok(!JSON.stringify(roster.data).includes(f.ids.outsider));assert.ok(!JSON.stringify(roster.data).includes('password'));
+  for(const c of [coach,nutrition,student,outsider])assert.equal((await c.request('professionals')).status,403);
+  const path='students/'+f.ids.studentRecord+'/assignments';
+  const external=await outsider.request('students',{name:'External synthetic profile',email:'external-assignment@fixture.invalid',internalNote:''});assert.equal(external.status,201);assert.equal((await admin.request('students/'+external.data.student.id+'/assignments',{coachId:f.ids.coach,nutritionId:null,revision:1},'PUT')).status,404);
+  const body={coachId:f.ids.otherCoach,nutritionId:f.ids.nutrition,revision:1};
+  for(const [c,status] of [[coach,403],[nutrition,403],[student,403],[replacement,404],[outsider,404]])assert.equal((await c.request(path,body,'PUT')).status,status);
+  for(const change of [{coachId:f.ids.outsider},{coachId:f.ids.admin},{coachId:f.ids.student},{nutritionId:f.ids.coach},{coachId:'*'},{revision:0},{role:'admin'}])assert.equal((await admin.request(path,{...body,...change},'PUT')).status,400);
+  f.store.run('UPDATE users SET active=0 WHERE id=?',f.ids.otherCoach);assert.equal((await admin.request(path,body,'PUT')).status,400);f.store.run('UPDATE users SET active=1 WHERE id=?',f.ids.otherCoach);
+  const input={title:'Unpublished reassignment test',exercises:[{name:'Synthetic exercise',sets:3,reps:10}]};let draft=(await coach.request('students/'+f.ids.studentRecord+'/plans',input)).data.plan;
+  for(const action of ['submit','approve'])draft=(await coach.request('plans/'+draft.id+'/'+action,{revision:draft.revision})).data.plan;
+  let published=(await coach.request('students/'+f.ids.studentRecord+'/plans',{...input,title:'Published history'})).data.plan;for(const action of ['submit','approve','publish'])published=(await coach.request('plans/'+published.id+'/'+action,{revision:published.revision})).data.plan;
+  const key=randomUUID(),assigned=await admin.request(path,body,'PUT',{'Idempotency-Key':key});assert.equal(assigned.status,200);assert.deepEqual(assigned.data.student.assignments,{coachId:f.ids.otherCoach,nutritionId:f.ids.nutrition});assert.deepEqual((await admin.request(path,body,'PUT',{'Idempotency-Key':key})).data,assigned.data);
+  assert.equal((await admin.request(path,body,'PUT')).status,409);assert.equal((await coach.request('students/'+f.ids.studentRecord)).status,404);assert.equal((await coach.request('plans/'+draft.id+'/publish',{revision:draft.revision})).status,404);assert.equal((await replacement.request('students/'+f.ids.studentRecord)).status,200);
+  const reset=f.store.get('SELECT * FROM plans WHERE id=?',draft.id);assert.equal(reset.status,'draft');assert.equal(reset.approved_by,null);assert.equal((await replacement.request('plans/'+draft.id+'/publish',{revision:reset.revision})).status,409);
+  assert.equal((await student.request('students/'+f.ids.studentRecord+'/plans')).data.plans[0].status,'published');assert.equal(f.store.get('SELECT status FROM plans WHERE id=?',published.id).status,'published');
+  const competing=await Promise.all([admin.request(path,{coachId:null,nutritionId:null,revision:2},'PUT'),admin.request(path,{coachId:f.ids.coach,nutritionId:null,revision:2},'PUT')]);assert.deepEqual(competing.map(r=>r.status).sort(),[200,409]);
+  const current=(await admin.request('students/'+f.ids.studentRecord)).data.student;assert.equal((await admin.request(path,{coachId:null,nutritionId:null,revision:current.revision},'PUT')).status,200);
+  for(const c of [coach,replacement,nutrition])assert.equal((await c.request('students/'+f.ids.studentRecord)).status,404);assert.equal((await student.request('students/'+f.ids.studentRecord)).status,200);
+  assert.deepEqual((await admin.request('students/'+f.ids.studentRecord)).data.student.assignments,{coachId:null,nutritionId:null});assert.equal((await admin.request('audit')).data.audit.filter(a=>a.event.startsWith('assignment.coach.changed:')).length,2+(competing[0].status===200?0:1));
+  await f.restart();assert.equal((await replacement.request('students/'+f.ids.studentRecord)).status,404);assert.equal((await admin.request('students/'+f.ids.studentRecord)).status,200);
+},{loginLimit:30}));
+
+test('synthetic acceptance: registration, separate invitations, assignment, activation, onboarding, reviewed publication and student visibility',async()=>withFixture(async f=>{
+  const admin=f.client(),recipient=f.client(),professional=f.client();await admin.login('admin');
+  const created=await admin.request('students',{name:'Synthetic acceptance student',email:'acceptance-student@fixture.invalid',internalNote:'INTERNAL ACCEPTANCE ONLY'});assert.equal(created.status,201);const id=created.data.student.id;
+  const professionalInvite=await admin.request('invitations',{kind:'professional',studentId:null,email:'acceptance-coach@fixture.invalid',name:'Synthetic acceptance coach',professionalRole:'coach',verifiedDelivery:true});assert.equal(professionalInvite.status,201);
+  assert.equal((await professional.request('activate',{email:'acceptance-coach@fixture.invalid',token:professionalInvite.data.token,password:FIXTURE_PASSWORD})).status,201);assert.equal((await professional.request('login',{email:'acceptance-coach@fixture.invalid',password:FIXTURE_PASSWORD})).status,200);
+  const coach=f.store.get("SELECT id FROM users WHERE email='acceptance-coach@fixture.invalid'").id;assert.equal((await admin.request('students/'+id+'/assignments',{coachId:coach,nutritionId:null,revision:1},'PUT')).status,200);
+  const invitation=await admin.request('invitations',{kind:'student',studentId:id,email:created.data.student.email,name:created.data.student.name,professionalRole:null,verifiedDelivery:true});assert.equal(invitation.status,201);
+  assert.equal((await recipient.request('activate',{email:created.data.student.email,token:invitation.data.token,password:FIXTURE_PASSWORD})).status,201);assert.equal((await recipient.request('login',{email:created.data.student.email,password:FIXTURE_PASSWORD})).status,200);
+  let row=(await recipient.request('students/'+id)).data.student;assert.ok(!JSON.stringify(row).includes('INTERNAL'));assert.equal((await recipient.request('onboarding',{goal:'Condicionamento',days:3,experience:'Iniciante',context:'Synthetic availability only',revision:row.revision},'PUT')).status,200);
+  let plan=(await professional.request('students/'+id+'/plans',{title:'Acceptance plan',exercises:[{name:'Synthetic exercise',sets:3,reps:10}]})).data.plan;
+  assert.equal((await recipient.request('students/'+id+'/plans')).data.plans.length,0);assert.equal((await professional.request('plans/'+plan.id+'/publish',{revision:plan.revision})).status,409);
+  for(const action of ['submit','approve','publish']){const result=await professional.request('plans/'+plan.id+'/'+action,{revision:plan.revision});assert.equal(result.status,200);plan=result.data.plan;}
+  assert.equal((await recipient.request('students/'+id+'/plans')).data.plans[0].id,plan.id);await f.restart();assert.equal((await recipient.request('students/'+id+'/plans')).data.plans[0].status,'published');
+},{loginLimit:30}));

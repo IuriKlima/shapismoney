@@ -42,3 +42,25 @@ O aplicativo não configura SMTP nem envia e-mail. Código aleatório de 256 bit
 Antes de atualizar o staging, aplicar **002-invitations.sql** usando somente `sim_migrator`, preservando banco/volume e as migrações antigas; a aplicação continua `sim_app`. Sem a migração nova, startup falha fechado pela conferência de checksums. Não iniciar deploy antes de preparar essa migração. Nenhum administrador, convite, código persistente ou destinatário real foi criado por esta implementação. Envio de e-mail, recuperação de senha e atribuição/reafetação de alunos a novos profissionais permanecem etapas separadas.
 
 For EasyPanel custom destinations, `tasks.medsi_shape-is-money:5190` avoids Swarm VIP source NAT. Traefik rewrites Host to that destination while setting X-Forwarded-Host to the public domain. Set `SIM_PROXY_UPSTREAM_HOST=tasks.medsi_shape-is-money:5190` only for this verified route, with `SIM_PUBLIC_ORIGIN=https://shapeismoney.com.br` and the exact trusted Traefik task IP. The app requires both the exact internal Host and canonical forwarded Host from that trusted peer; ambiguous forwarded chains and unapproved staging clients remain denied. Verify a real request through the public domain after each deployment; an internal probe alone does not prove browser access.
+
+## Staging acceptance checkpoint (2026-10-08)
+
+The canonical origin is `https://shapeismoney.com.br`. The service remains staging-only (`SIM_PRODUCTION_REVIEWED=false`, AI disabled), with the approved client IP allowlist and exact Traefik peer. Real Windows HTTPS requests to `/`, `/local`, JS, CSS and logo returned 200; unauthenticated API returned 401, invalid POST Origin and off-allowlist/spoofed forwarding returned 403. User login under the final origin still requires the user's own browser and password. A different mobile network is not automatically allowed.
+
+| Requirement | Status | Evidence / acceptance still required |
+| --- | --- | --- |
+| Final domain and TLS | Ready for restricted staging | Real public Windows requests, valid TLS; canonical origin set |
+| Individual login, tenant/role isolation, CSRF | Implemented | SQLite/PostgreSQL tests; real user login pending |
+| Student registration and manual onboarding | Implemented | API and UI tests; no automatic account or email |
+| Separate student/professional activation invitations | Implemented, manual delivery | Synthetic activation/login tests; identity checked by administrator, not mailbox verification |
+| Professional assignment, replacement and revocation | Implemented | Admin-only, active same-organization roster, revision/idempotency/audit tests; no real assignments made |
+| Draft, review, approval and published training | Implemented | Synthetic end-to-end acceptance; reassignment resets unpublished approval and preserves published history |
+| Persistent workout execution and ranking | Absent in authenticated backend | Existing demonstration behavior is not a production feature |
+| AI | Partial, disabled in staging | Authenticated synthetic provider mocks; production key and real-context authorization pending |
+| SMTP and password reset | Absent | No email sent; credential changes require separate secure handoff |
+| Authenticated uploads and persistent nutrition | Absent | No authenticated storage or nutrition workflow |
+| Payments | Deferred by user | No provider selected or contracted |
+| Mobile appearance | Partial acceptance | Responsive shared UI and DOM workflow tests; user/device visual review pending |
+| Production release | Pending | Keep staging restrictions and review flag false until explicit acceptance |
+
+Assignment reuses existing columns and requires no migration or existing-data rewrite. Revoking a personal returns the student's record to the acting organization administrator; it does not assign a professional role to that administrator. Old professionals lose access on subsequent requests, including requests revalidated after taking the student row lock. PostgreSQL locks serialize assignment against onboarding and training writes. Existing published plans remain available to the student; unpublished plans lose approval and must be reviewed again by the new responsible professional.

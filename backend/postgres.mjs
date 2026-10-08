@@ -10,6 +10,7 @@ export function postgresStore(pool){
   const context=new AsyncLocalStorage();
   const query=(sql,args=[])=>{const client=context.getStore()||pool;return client.query(numberedSQL(sql),args);};
   return {kind:'postgres',get:async(sql,...args)=>(await query(sql,args)).rows[0],all:async(sql,...args)=>(await query(sql,args)).rows,run:async(sql,...args)=>({changes:(await query(sql,args)).rowCount}),
+    lockStudent:async id=>{await query('SELECT id FROM students WHERE id=? FOR UPDATE',[id]);},
     lockActor:async id=>{await query('SELECT id FROM users WHERE id=? FOR UPDATE',[id]);},
     async transaction(work){if(context.getStore())throw Error('Nested transactions are unsupported.');const client=await pool.connect();try{await client.query('BEGIN');const result=await context.run(client,work);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}},
     close:()=>pool.end(),query

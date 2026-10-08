@@ -105,3 +105,23 @@ test('PostgreSQL limitado: convite isolado e consumo concorrente atômico com ro
   assert.ok(!JSON.stringify(await store.all('SELECT * FROM operations')).includes(invite.token));assert.ok(!JSON.stringify(await store.all('SELECT * FROM audit')).includes(invite.token));await assert.rejects(()=>store.query('CREATE TABLE forbidden_invite(id INTEGER)'));
  }finally{await app.close();}
 });
+
+test('PostgreSQL limited role: assignment revokes access and resets pending approval atomically',async()=>{
+  const {db,store}=await embedded();await migratePostgres(store);const org=randomUUID(),externalOrg=randomUUID(),admin=randomUUID(),coach=randomUUID(),nextCoach=randomUUID(),nutrition=randomUUID(),outsider=randomUUID(),student=randomUUID(),hash=await hashPassword(FIXTURE_PASSWORD);
+  await store.transaction(async()=>{
+    for(const id of [org,externalOrg])await store.run('INSERT INTO organizations VALUES (?,?)',id,'Synthetic organization');
+    for(const [id,tenant,role,email] of [[admin,org,'admin','admin'],[coach,org,'coach','coach'],[nextCoach,org,'coach','next'],[nutrition,org,'nutrition','nutrition'],[outsider,externalOrg,'coach','external']])await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,tenant,email+'@fixture.invalid',email,role,hash);
+    await store.run('INSERT INTO students(id,org_id,coach_id,nutrition_id,email,name) VALUES (?,?,?,?,?,?)',student,org,coach,nutrition,'synthetic@fixture.invalid','Synthetic student');
+  });await db.exec('SET ROLE sim_app');
+  const app=await createLocalServer({store,loginLimit:30});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+app.server.address().port;
+  const client=()=>{let cookie='';return {async request(path,body,method='POST',key=randomUUID()){const r=await fetch(origin+'/api/local/'+path,{method:body===undefined?'GET':method,headers:{Origin:origin,'Content-Type':'application/json','Idempotency-Key':key,Cookie:cookie},body:body===undefined?undefined:JSON.stringify(body)});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};}};};
+  try{const a=client(),c=client(),n=client();for(const [who,email] of [[a,'admin'],[c,'coach'],[n,'next']])assert.equal((await who.request('login',{email:email+'@fixture.invalid',password:FIXTURE_PASSWORD})).status,200);
+    const path='students/'+student+'/assignments';assert.equal((await a.request(path,{coachId:outsider,nutritionId:nutrition,revision:1},'PUT')).status,400);assert.equal((await a.request(path,{coachId:nutrition,nutritionId:nutrition,revision:1},'PUT')).status,400);
+    let plan=(await c.request('students/'+student+'/plans',{title:'Synthetic draft',exercises:[{name:'Example',sets:3,reps:10}]})).data.plan;for(const action of ['submit','approve'])plan=(await c.request('plans/'+plan.id+'/'+action,{revision:plan.revision})).data.plan;
+    const key=randomUUID(),body={coachId:nextCoach,nutritionId:null,revision:1};const results=await Promise.all([a.request(path,body,'PUT',key),a.request(path,body,'PUT',key)]);assert.deepEqual(results[0],results[1]);assert.equal(results[0].status,200);
+    assert.equal((await c.request('students/'+student)).status,404);assert.equal((await n.request('students/'+student)).status,200);assert.equal((await a.request(path,body,'PUT')).status,409);assert.equal((await store.get('SELECT status FROM plans WHERE id=?',plan.id)).status,'draft');assert.equal((await store.get('SELECT approved_by FROM plans WHERE id=?',plan.id)).approved_by,null);
+    const reset=await store.get('SELECT revision FROM plans WHERE id=?',plan.id);assert.equal((await n.request('plans/'+plan.id+'/publish',{revision:reset.revision})).status,409);
+    assert.equal((await a.request(path,{coachId:null,nutritionId:null,revision:2},'PUT')).status,200);assert.equal((await n.request('students/'+student)).status,404);assert.equal((await a.request('students/'+student)).status,200);
+    assert.equal((await store.get("SELECT COUNT(*)::integer AS n FROM audit WHERE event LIKE 'assignment.coach.changed:%'")).n,2);
+  }finally{await app.close();}
+});
