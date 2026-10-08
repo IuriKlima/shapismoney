@@ -23,5 +23,5 @@ for(const condition of ['outside-allowlist','expired-window','zero-budget','auth
  if(role==='admin')assert.equal((await request('ai/chat/capabilities')).data.available,condition==='authorized-chat');
  }
  assert.equal(calls,0);assert.equal(f.store.get('SELECT COUNT(*) n FROM ai_monthly_reservations').n,0);assert.equal(f.store.get("SELECT COUNT(*) n FROM operations WHERE operation_key LIKE 'ai-budget-%'").n,0);
- }finally{await app.close();rmSync(f.directory,{recursive:true,force:true});}
+ }finally{await app.close();rmSync(f.directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });

@@ -1,0 +1,12 @@
+import {randomUUID} from 'node:crypto';
+import {rmSync} from 'node:fs';
+import {isolatedFixture,FIXTURE_PASSWORD} from './backend-fixtures.mjs';
+import {createLocalServer} from '../backend/server.mjs';
+export const NEW_PASSWORD='Self-chosen-fictitious-only-2026!';
+export async function passwordFixture(options={}){const f=await isolatedFixture(),messages=[];const configuration={enabled:true,reviewed:true,publicOrigin:'https://shape.example.test',autoDispatch:false,minimumResponseMs:0,transport:{kind:'mock',send:async m=>{messages.push(m);return {accepted:true};}},...options.accessEmail};let app=await createLocalServer({store:f.store,loginLimit:30,now:options.now,accessEmail:configuration});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));let origin='http://127.0.0.1:'+app.server.address().port;
+ const client=()=>{let cookie='';return {async request(route,body,method='POST',headers={}){const response=await fetch(origin+'/api/local/'+route,{method:body===undefined?'GET':method,headers:{...(cookie?{Cookie:cookie}:{}),...(body===undefined?{}:{Origin:origin,'Content-Type':'application/json','Idempotency-Key':randomUUID()}),...headers},body:body===undefined?undefined:JSON.stringify(body)});if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];return {status:response.status,data:await response.json(),headers:response.headers};},login(role,password=FIXTURE_PASSWORD){return this.request('login',{email:role+'@fixture.invalid',password});}};};
+ return {...f,client,messages,configuration,get store(){return app.store;},get app(){return app;},async restart(){await app.close();app=await createLocalServer({filename:f.filename,loginLimit:30,now:options.now,accessEmail:configuration});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+app.server.address().port;},async close(){await app.close();rmSync(f.directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});}};
+}
+export const registration=(email,level='training')=>({name:'Aluno acesso fictício',email,accessLevel:level,accessExpiresAt:null,accessConfirmed:true});
+export const messageToken=message=>/#password=([A-Za-z0-9_-]{43})/.exec(message.text)?.[1];
+export async function issuedLink(f,client,address,kind='signup'){const reply=await client.request('password-access/'+kind+'/request',{email:address});if(reply.status!==202)throw Error('Synthetic link request failed');await f.app.flushAccessEmail();return messageToken(f.messages.at(-1));}

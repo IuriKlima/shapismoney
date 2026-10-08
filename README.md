@@ -103,3 +103,7 @@ Bruno registra próximos passos internos com confirmação e controle de concorr
 ### Propostas de treino personalizadas — bloco local
 
 O fluxo local simulado prepara propostas pela anamnese revisada, exige escolha opcional específica do aluno e salva somente rascunhos conferidos/editáveis. Sinais de atenção exigem resolução explícita do personal antes de aprovar ou publicar qualquer treino, inclusive manual. Desligado por padrão e sem conexão externa; metodologia privada aguarda validação do Bruno. Geração de cardápio permanece pendente. Consulte [escopo e limites](docs/training-proposals.md).
+
+## Cadastro e senha por e-mail (transporte pendente)
+
+Veja [docs/account-access.md](docs/account-access.md) para o novo Criar conta, autorização manual por nível e recuperação de senha. Esses fluxos foram implementados depois das etapas históricas acima, sem nova migração. Envio real segue desabilitado e depende de provedor/remetente aprovados e configuração privada. Login e convites privados continuam funcionando.

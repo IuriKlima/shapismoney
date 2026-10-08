@@ -46,5 +46,5 @@ test('integrated synthetic pilot: invite, original intake, SLA, reviewed trainin
  const session=(await ok(a.req('ai/chat/sessions',{studentId:null,providerConsent:true}),201)).sessionId;await ok(a.req('ai/chat/message',{sessionId:session,message:'Synthetic administrative question only'}));assert.equal(calls,1);assert.equal(inputs[0].untrustedContext.publishedPlans.length,0);assert.ok(!JSON.stringify(inputs).includes('PRIVATE_SYNTHETIC'));
  assert.equal(f.store.get('SELECT COUNT(*) n FROM ai_monthly_reservations').n,1);const budget=await ok(a.req('ai/budget'));assert.ok(budget.administrative.reservedUSD>0&&budget.administrative.reservedUSD<.003);assert.equal(budget.openAIBalanceKnown,false);
  clock+=21*60000;await ok(a.req('ai/chat/message',{sessionId:session,message:'Expired synthetic session'}),404);assert.equal(calls,1);clock+=86400000;await ok(a.login('admin'));assert.equal((await ok(a.req('ai/chat/capabilities'))).available,false);await ok(a.req('ai/chat/sessions',{studentId:null,providerConsent:true}),503);assert.equal(calls,1);assert.equal(f.store.get("SELECT COUNT(*) n FROM audit WHERE event='ai.provider-consent'").n,1);
- }finally{await app.close();rmSync(f.directory,{recursive:true,force:true});}
+ }finally{await app.close();rmSync(f.directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });

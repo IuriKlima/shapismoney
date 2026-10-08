@@ -853,3 +853,5 @@
 
 .supervision-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}#supervision-section .note,#supervision-section p,#supervision-section summary{overflow-wrap:anywhere}#supervision-section textarea{width:100%;box-sizing:border-box}
 .team-shell .premium-mobile-nav{overflow-x:auto;justify-content:flex-start}.team-shell .premium-mobile-nav button{flex:0 0 76px}
+
+#create-student :is(input,select,textarea),#access-section :is(input,select),.access-password input,.access-signup input,.access-reset input{min-width:0;max-width:100%;box-sizing:border-box}#access-section .btn,.access-password .btn,.access-signup .btn,.access-reset .btn{max-width:100%;white-space:normal}

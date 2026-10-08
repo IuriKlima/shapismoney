@@ -1,3 +1,5 @@
+import {accessPolicy} from './access-policy.mjs';
+import {passwordAccessFlow} from './password-access.mjs';
 import {manualTrainingFlow,publicTrainingContent} from './manual-training.mjs';
 import {trainingSafety} from './training-safety.mjs';
 import {trainingProposalFlow} from './training-proposals.mjs';
@@ -19,9 +21,11 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:publicTrainingContent(JSON.parse(p.content)),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},accessEmail={}}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
+  const access=accessPolicy({store,now,deny,audit});
+  const userDTO=async u=>({...publicUser(u),...(u.role==='student'?{access:await access.userSummary(u)}:{})});
   async function session(req){
     const match=new RegExp('(?:^|;\\s*)'+security.cookieName+'=([A-Za-z0-9_-]{43})(?:;|$)').exec(req.headers.cookie||'');
     if(!match)return null;
@@ -31,6 +35,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   async function student(actor,id){
     const row=await store.get('SELECT s.*,c.role AS coach_role FROM students s JOIN users c ON c.id=s.coach_id WHERE s.id=? AND s.org_id=?',id,actor.org_id);
     if(!row||!(actor.role==='admin'||actor.role==='coach'&&row.coach_id===actor.id||actor.role==='nutrition'&&row.nutrition_id===actor.id||actor.role==='student'&&row.user_id===actor.id))deny(404,'Aluno não encontrado.');
+    if(actor.role==='student')await access.assertActive(row);
     return row;
   }
   function studentDTO(row,actor){const result={id:row.id,name:row.name,email:row.email,onboarding:JSON.parse(row.onboarding),revision:row.revision};if(actor.role!=='student')result.internalNote=row.internal_note;if(actor.role==='admin')result.assignments={coachId:row.coach_role==='coach'?row.coach_id:null,nutritionId:row.nutrition_id};return result;}
@@ -38,12 +43,12 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   async function list(actor){
     if(actor.role==='admin')return await store.all('SELECT s.*,c.role AS coach_role FROM students s JOIN users c ON c.id=s.coach_id WHERE s.org_id=? ORDER BY s.name',actor.org_id);
     const column={coach:'coach_id',nutrition:'nutrition_id',student:'user_id'}[actor.role];if(!column)deny(403,'Papel inválido.');
-    return await store.all('SELECT s.*,c.role AS coach_role FROM students s JOIN users c ON c.id=s.coach_id WHERE s.org_id=? AND s.'+column+'=? ORDER BY s.name',actor.org_id,actor.id);
+    const rows=await store.all('SELECT s.*,c.role AS coach_role FROM students s JOIN users c ON c.id=s.coach_id WHERE s.org_id=? AND s.'+column+'=? ORDER BY s.name',actor.org_id,actor.id);if(actor.role==='student')for(const row of rows)await access.assertActive(row);return rows;
   }
   async function mutation(actor,req,body,work){
     const key=req.headers['idempotency-key'];if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,80}$/.test(key))deny(400,'Chave de operação obrigatória.');
     const hash=createHash('sha256').update(req.method+' '+req.url+' '+JSON.stringify(body)).digest('hex');
-    return await store.transaction(async()=>{await store.lockActor(actor.id);const currentActor=await store.get('SELECT active,role,org_id FROM users WHERE id=?',actor.id);if(!currentActor?.active||currentActor.role!==actor.role||currentActor.org_id!==actor.org_id)deny(401,'Acesso mudou. Entre novamente.');const previous=await store.get('SELECT * FROM operations WHERE actor_id=? AND operation_key=?',actor.id,key);if(previous){if(previous.request_hash!==hash)deny(409,'Chave reutilizada para outro pedido.');return {status:previous.status,data:JSON.parse(previous.result)};}
+    return await store.transaction(async()=>{await store.lockActor(actor.id);const currentActor=await store.get('SELECT active,role,org_id FROM users WHERE id=?',actor.id),live=await session(req);if(!currentActor?.active||currentActor.role!==actor.role||currentActor.org_id!==actor.org_id||live?.user.id!==actor.id)deny(401,'Acesso ou sessão mudou. Entre novamente.');const previous=await store.get('SELECT * FROM operations WHERE actor_id=? AND operation_key=?',actor.id,key);if(previous){if(previous.request_hash!==hash)deny(409,'Chave reutilizada para outro pedido.');return {status:previous.status,data:JSON.parse(previous.result)};}
       const result=await work();await store.run('INSERT INTO operations VALUES (?,?,?,?,?)',actor.id,key,hash,result.status,JSON.stringify(result.data));return result;});
   }
   async function saveOnboarding(actor,req,row,body,event){
@@ -62,9 +67,9 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{deny(400,'JSON inválido.');}
   }
   function studentWork(actor,body){
-        if(!['admin','coach'].includes(actor.role))deny(403,'Cadastro exige administrador da organização ou personal responsável.');exact(body,['name','email','internalNote']);const name=text(body.name,2,100),address=email(body.email),note=text(body.internalNote,0,1000);
+        if(!['admin','coach'].includes(actor.role))deny(403,'Cadastro exige administrador da organização ou personal responsável.');const manual=Object.hasOwn(body,'accessLevel');exact(body,['name','email',...(Object.hasOwn(body,'internalNote')?['internalNote']:[]),...(manual?['accessLevel','accessExpiresAt','accessConfirmed']:[])]);const name=text(body.name,2,100),address=email(body.email),note=text(body.internalNote??'',0,1000);if(manual){if(actor.role!=='admin')deny(403,'Nível de acesso exige administrador.');if(body.accessConfirmed!==true)deny(400,'Confirme o acesso manual.');access.validate(body.accessLevel,body.accessExpiresAt);}
 
-    return async()=>{if(await store.get('SELECT id FROM students WHERE org_id=? AND email=?',actor.org_id,address))deny(409,'Este e-mail já está cadastrado.');const id=randomUUID();await store.run('INSERT INTO students(id,org_id,coach_id,email,name,internal_note) VALUES (?,?,?,?,?,?)',id,actor.org_id,actor.id,address,name,note);await audit(actor,id,'student.created');return {status:201,data:{student:studentDTO(await student(actor,id),actor),accountProvisioned:false}};};
+    return async()=>{if(await store.get('SELECT id FROM students WHERE org_id=? AND email=?',actor.org_id,address))deny(409,'Este e-mail já está cadastrado.');if(manual){const existing=await store.get('SELECT org_id,role FROM users WHERE email=?',address);if(existing&&(existing.org_id!==actor.org_id||existing.role!=='student'))deny(409,'Vínculo de acesso indisponível para este cadastro.');}const id=randomUUID();await store.run('INSERT INTO students(id,org_id,coach_id,email,name,internal_note) VALUES (?,?,?,?,?,?)',id,actor.org_id,actor.id,address,name,note);await audit(actor,id,'student.created');const row=await student(actor,id);let grant,welcomeQueued=false;if(manual){grant=await access.grantLocked(actor,row,{level:body.accessLevel,expiresAt:body.accessExpiresAt});welcomeQueued=await passwordAccess.welcomeLocked(actor,row,grant);}return {status:201,data:{student:studentDTO(row,actor),accountProvisioned:false,...(manual?{access:grant,welcomeQueued,emailAvailable:passwordAccess.available()}: {})}};};
   }
   async function planWork(actor,id,body){
     const row=await student(actor,id);
@@ -73,6 +78,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
 
     return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek,...(instructions?{instructions}:{})}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
   }
+  const passwordAccess=passwordAccessFlow({store,now,deny,exact,email,text,read,audit,mutation,student,policy:access,security,configuration:accessEmail});
   const manualTraining=manualTrainingFlow({store,deny,exact,text,read,mutation,student,trainingManager,audit,publicPlan});
   const intake=anamnesisFlow({store,now,deny,exact,read,mutation,student,audit,changed:(...args)=>sla.changed(...args,'anamnesis'),start:(...args)=>sla.start(...args)});
   const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit,intakeState:intake.state});
@@ -80,10 +86,10 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const trainingSafetyFlow=trainingSafety({store,now,deny,exact,text,read,mutation,student,audit});
   const trainingProposal=trainingProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,safety:trainingSafetyFlow,security,configuration:trainingProposals,budgetConfiguration:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
-  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student,audit});
+  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit});
   const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
-  const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student});
+  const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate:async row=>{await access.assertActive(row);}});
   const handle=async function handle(req,res){
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
     try{
@@ -102,10 +108,12 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         const old=await session(req);if(old)await store.run('DELETE FROM sessions WHERE token_hash=?',old.hash);
         const token=newToken();await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE expires_at<=?',now());await store.run('INSERT INTO sessions VALUES (?,?,?)',tokenHash(token),user.id,now()+sessionMs);await audit(user,null,'login');});
         // HTTP loopback only. Production must use HTTPS + Secure + __Host- cookie.
-        res.setHeader('Set-Cookie',cookieHeader(security,token,Math.floor(sessionMs/1000)));return send(200,{user:publicUser(user)});
+        res.setHeader('Set-Cookie',cookieHeader(security,token,Math.floor(sessionMs/1000)));return send(200,{user:await userDTO(user)});
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
+      const passwordResult=await passwordAccess.handlePublic(req,connection,route);if(passwordResult){if(passwordResult.clearSession)res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(passwordResult.status,passwordResult.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const accessResult=await passwordAccess.handle(actor,req,route);if(accessResult)return send(accessResult.status,accessResult.data);
       const manualResult=await manualTraining.handle(actor,req,route);if(manualResult){if(manualResult.binary){res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename="'+manualResult.filename+'"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"sandbox; default-src 'none'"});return res.end(manualResult.binary);}return send(manualResult.status,manualResult.data);}
       const safetyResult=await trainingSafetyFlow.handle(actor,req,route);if(safetyResult)return send(safetyResult.status,safetyResult.data);
       const proposalResult=await trainingProposal.handle(actor,auth,req,route);if(proposalResult)return send(proposalResult.status,proposalResult.data);
@@ -116,7 +124,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       const chatResult=await chatFlow.handle(actor,auth,req,route);if(chatResult)return send(chatResult.status,chatResult.data);
       if(route==='/api/local/ai/capabilities'&&req.method==='GET')return send(200,{available:false,reason:'legacy-disabled',mode:'synthetic-development',writesPerformed:false});
       if(route==='/api/local/ai'&&req.method==='POST'){deny(503,'Rota antiga de IA desativada. Use o chat autorizado.');}
-      if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:publicUser(actor)});
+      if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:await userDTO(actor)});
       if(route==='/api/local/logout'&&req.method==='POST'){
         const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);trainingProposal.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
@@ -126,7 +134,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/professionals'&&req.method==='GET'){if(actor.role!=='admin')deny(403,'Equipe restrita ao administrador.');return send(200,{professionals:await store.all("SELECT id,name,role FROM users WHERE org_id=? AND active=1 AND role IN ('coach','nutrition') ORDER BY name",actor.org_id)});}
       if(route==='/api/local/students'&&req.method==='GET')return send(200,{students:(await list(actor)).map(row=>studentDTO(row,actor))});
       if(route==='/api/local/students'&&req.method==='POST'){
-        const body=await read(req);const result=await mutation(actor,req,body,studentWork(actor,body));return send(result.status,result.data);
+        const body=await read(req);const work=studentWork(actor,body);if(Object.hasOwn(body,'accessLevel'))await passwordAccess.throttleRegistration(actor);const result=await mutation(actor,req,body,work);return send(result.status,result.data);
       }
       if(route==='/api/local/onboarding'&&req.method==='PUT'){
         if(actor.role!=='student')deny(403,'Onboarding pertence ao aluno.');const row=await store.get('SELECT * FROM students WHERE user_id=? AND org_id=?',actor.id,actor.org_id);if(!row)deny(404,'Vínculo de aluno pendente.');
@@ -179,5 +187,5 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       deny(404,'Recurso não encontrado. Uploads ainda indisponíveis.');
     }catch(error){const code=error instanceof Failure||error.safe===true?error.status:['23505','SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)?409:500;send(code,{error:error instanceof Failure||error.safe===true?error.message:code===409?'Este cadastro ou operação já existe.':'Não foi possível concluir a operação.'});}
   };
-  handle.close=()=>{chatFlow.close();trainingProposal.close();};return handle;
+  handle.flushAccessEmail=()=>passwordAccess.flush();handle.close=async()=>{chatFlow.close();trainingProposal.close();await passwordAccess.close();};return handle;
 }

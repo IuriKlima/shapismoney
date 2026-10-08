@@ -25,3 +25,5 @@
 !public/sim/training-proposals-ui.js
 
 !public/sim/manual-training-ui.js
+
+!public/sim/access-ui.js

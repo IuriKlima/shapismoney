@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {hashPassword,newToken,tokenHash} from './auth.mjs';
 // Codes are entered in a POST body, never a URL. Delivery is exclusively manual.
-export function invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student}){
+export function invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate=async()=>{}}){
   async function throttle(bucket,limit){await store.transaction(async()=>{const a=await store.get('INSERT INTO login_attempts(bucket,count,reset_at) VALUES (?,?,?) ON CONFLICT(bucket) DO UPDATE SET count=CASE WHEN login_attempts.reset_at<=? THEN 1 ELSE login_attempts.count+1 END,reset_at=CASE WHEN login_attempts.reset_at<=? THEN ? ELSE login_attempts.reset_at END RETURNING count',bucket,1,now()+900000,now(),now(),now()+900000);if(a.count>limit)deny(429,'Aguarde antes de tentar novamente.');});}
   async function activate(req,connection){
     await throttle('activate-ip:'+connection.clientIP,8);
@@ -12,6 +12,7 @@ export function invitationFlow({store,now,audit,deny,exact,email,text,read,mutat
       const invite=await store.get('UPDATE invitations SET consumed_at=? WHERE token_hash=? AND email=? AND consumed_at IS NULL AND expires_at>? RETURNING *',now(),digest,address,now());
       if(!invite)deny(400,'Convite inválido, expirado ou já utilizado.');
       const issuer=await store.get("SELECT id FROM users WHERE id=? AND org_id=? AND role='admin' AND active=1",invite.created_by,invite.org_id);if(!issuer)deny(400,'Convite indisponível.');
+      if(invite.role==='student'){const row=await store.get('SELECT * FROM students WHERE id=? AND org_id=?',invite.student_id,invite.org_id);if(!row)deny(400,'Convite indisponível.');await canActivate(row);}
       if(await store.get('SELECT id FROM users WHERE email=?',address))deny(409,'Destinatário já possui acesso.');
       const id=randomUUID();await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,invite.org_id,address,invite.name,invite.role,password);
       if(invite.role==='student'){const updated=await store.run('UPDATE students SET user_id=?,revision=revision+1 WHERE id=? AND org_id=? AND email=? AND user_id IS NULL',id,invite.student_id,invite.org_id,address);if(updated.changes!==1)deny(409,'Vínculo de aluno indisponível.');}
