@@ -19,3 +19,9 @@ test('configuração DB rejeita papel privilegiado e TLS inseguro; somente rede 
 test('artefatos não embutem env/QA; DB sem porta publicada e runtime não recebe bootstrap',()=>{
   const docker=readFileSync(new URL('../deploy/Dockerfile',import.meta.url),'utf8'),compose=readFileSync(new URL('../deploy/compose.yaml',import.meta.url),'utf8').replaceAll('\r\n','\n');assert.match(docker,/USER node/);assert.match(docker,/HEALTHCHECK/);assert.ok(!/COPY\s+\.\s/.test(docker));assert.ok(!docker.includes('tests/'));assert.ok(!compose.includes('ports:'));const runtime=compose.slice(compose.indexOf('  shape-is-money:\n'),compose.indexOf('\nnetworks:'));assert.ok(!runtime.includes('db_bootstrap'));assert.match(runtime,/read_only: true/);assert.match(runtime,/SIM_AI_ENABLED: "false"/);
 });
+
+test('staging HTTPS restrito funciona antes de aprovação; produção continua bloqueada',()=>{
+  const staging={...env,SIM_DEPLOYMENT_STAGE:'staging',SIM_PRODUCTION_REVIEWED:'false',SIM_STAGING_CLIENT_IPS:'203.0.113.10'};const security=productionSecurity(staging);assert.equal(security.stage,'staging');assert.match(cookieHeader(security,'fictitious',3600),/Secure/);
+  const req={method:'POST',socket:{remoteAddress:'172.20.0.2'},headers:{host:'app.example.test',origin:'https://app.example.test','x-forwarded-proto':'https','x-forwarded-for':'203.0.113.10'}};assert.doesNotThrow(()=>assertRequest(req,security));assert.throws(()=>assertRequest({...req,headers:{...req.headers,'x-forwarded-for':'203.0.113.11'}},security),/homologação restrito/);
+  for(const clients of ['', '203.0.113.0/24','*'])assert.throws(()=>productionSecurity({...staging,SIM_STAGING_CLIENT_IPS:clients}));assert.throws(()=>productionSecurity({...staging,SIM_DEPLOYMENT_STAGE:'production'}),/review flag/);assert.throws(()=>productionSecurity({...staging,SIM_PUBLIC_ORIGIN:'http://app.example.test'}));
+});

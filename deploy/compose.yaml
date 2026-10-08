@@ -43,7 +43,9 @@ services:
     environment:
       NODE_ENV: production
       SIM_BACKEND_PORT: "5190"
-      SIM_PRODUCTION_REVIEWED: ${SIM_PRODUCTION_REVIEWED:?review required}
+      SIM_PRODUCTION_REVIEWED: ${SIM_PRODUCTION_REVIEWED:-false}
+      SIM_DEPLOYMENT_STAGE: ${SIM_DEPLOYMENT_STAGE:-production}
+      SIM_STAGING_CLIENT_IPS: ${SIM_STAGING_CLIENT_IPS:-}
       SIM_PUBLIC_ORIGIN: ${SIM_PUBLIC_ORIGIN:?HTTPS origin required}
       SIM_TRUSTED_PROXY_IPS: ${SIM_TRUSTED_PROXY_IPS:?exact proxy IPs required}
       PGHOST: shape-is-money-db

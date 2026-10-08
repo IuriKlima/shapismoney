@@ -1,3 +1,4 @@
+import {provisionInitialAdmin} from '../backend/bootstrap.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -39,4 +40,10 @@ test('contrato do pool usa mesmo cliente na transação e libera após rollback'
   const calls=[];const client={query:async(...args)=>{calls.push(args);return {rows:[{id:'actor'}],rowCount:1};},release:()=>calls.push(['release'])};const store=postgresStore({query:()=>assert.fail('pool.query must not handle transaction'),connect:async()=>client,end:async()=>{}});
   await assert.rejects(()=>store.transaction(async()=>{await store.lockActor('actor');await store.run('INSERT INTO table_x VALUES (?)','parameter');throw Error('rollback');}),/rollback/);
   assert.deepEqual(calls.map(c=>c[0]),['BEGIN','SELECT id FROM users WHERE id=$1 FOR UPDATE','INSERT INTO table_x VALUES ($1)','ROLLBACK','release']);assert.deepEqual(calls[2][1],['parameter']);assert.equal(numberedSQL("SELECT '?' AS q, ? AS id, 'it''s?' AS t"),"SELECT '?' AS q, $1 AS id, 'it''s?' AS t");
+});
+
+test('PostgreSQL embarcado: bootstrap com papel limitado cria/audita e recusa admin existente',async()=>{
+  const {db,store}=await embedded();try{await migratePostgres(store);await db.exec('SET ROLE sim_app');await verifyRuntimeRole(store);
+    const input={store,email:'initial@bootstrap.example.test',name:'Administrador Fictício PG',organizationName:'Fictícia PG',password:FIXTURE_PASSWORD,confirmation:'CRIAR ADMINISTRADOR INICIAL'};const result=await provisionInitialAdmin(input);assert.equal(result.role,'admin');assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users')).n,1);assert.equal((await store.get("SELECT COUNT(*)::integer AS n FROM audit WHERE event='bootstrap.admin.created'")).n,1);await assert.rejects(()=>provisionInitialAdmin(input),/Já existe administrador/);await verifyRuntimeRole(store);
+  }finally{await store.close();}
 });
