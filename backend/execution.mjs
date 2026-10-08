@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {publicTrainingContent} from './manual-training.mjs';
 const ZONE='America/Sao_Paulo';
 export function executionDay(now){const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(now)).map(p=>[p.type,p.value]));return parts.year+'-'+parts.month+'-'+parts.day;}
 export function executionWeek(day){const date=new Date(day+'T12:00:00Z');date.setUTCDate(date.getUTCDate()-((date.getUTCDay()+6)%7));return date.toISOString().slice(0,10);}
@@ -12,7 +13,7 @@ export function executionFlow({store,now,audit,deny,exact,text,read,mutation,stu
     if(route==='/api/local/workouts'&&req.method==='POST'){
       const profile=await own(actor),body=await read(req);exact(body,['planId']);if(typeof body.planId!=='string'||!/^[a-f0-9-]{36}$/.test(body.planId))deny(400,'Plano inválido.');
       return await mutation(actor,req,body,async()=>{await store.lockStudent(profile.id);await own(actor);const plan=await store.get("SELECT * FROM plans WHERE id=? AND student_id=? AND status='published'",body.planId,profile.id);if(!plan)deny(404,'Treino publicado não encontrado.');const day=today(),previous=await store.get('SELECT * FROM workouts WHERE student_id=? AND day=?',profile.id,day);if(previous){if(previous.plan_id!==plan.id)deny(409,'Já existe uma execução hoje. Retome o treino iniciado.');return {status:200,data:{workout:await dto(previous)}};}
-        const content=JSON.parse(plan.content),weeklyTarget=content.daysPerWeek||3,id=randomUUID();await store.run('INSERT INTO workouts(id,org_id,student_id,plan_id,day,prescription,weekly_target,updated_at) VALUES (?,?,?,?,?,?,?,?)',id,actor.org_id,profile.id,plan.id,day,JSON.stringify({...content,daysPerWeek:weeklyTarget}),weeklyTarget,now());await audit(actor,profile.id,'workout.started');return {status:201,data:{workout:await dto(await store.get('SELECT * FROM workouts WHERE id=?',id))}};});
+        const content=publicTrainingContent(JSON.parse(plan.content));if(!content.exercises?.length)deny(409,'Treino em PDF: consulte o arquivo; registro por série exige prescrição estruturada.');const weeklyTarget=content.daysPerWeek||3,id=randomUUID();await store.run('INSERT INTO workouts(id,org_id,student_id,plan_id,day,prescription,weekly_target,updated_at) VALUES (?,?,?,?,?,?,?,?)',id,actor.org_id,profile.id,plan.id,day,JSON.stringify({...content,daysPerWeek:weeklyTarget}),weeklyTarget,now());await audit(actor,profile.id,'workout.started');return {status:201,data:{workout:await dto(await store.get('SELECT * FROM workouts WHERE id=?',id))}};});
     }
     const match=/^\/api\/local\/workouts\/([a-f0-9-]{36})(\/sets|\/history)?$/.exec(route);
     if(match){const row=await store.get('SELECT * FROM workouts WHERE id=?',match[1]);await allowed(actor,row);

@@ -1,3 +1,4 @@
+import {manualTrainingFlow,publicTrainingContent} from './manual-training.mjs';
 import {trainingSafety} from './training-safety.mjs';
 import {trainingProposalFlow} from './training-proposals.mjs';
 import {supervisionFlow} from './supervision.mjs';
@@ -17,7 +18,7 @@ const exact=(data,keys)=>{if(!data||typeof data!=='object'||Array.isArray(data)|
 const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min||value.length>max||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value))deny(400,'Texto inválido.');return value.trim();};
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
-const publicPlan=p=>({id:p.id,title:p.title,content:JSON.parse(p.content),status:p.status,revision:p.revision});
+const publicPlan=p=>({id:p.id,title:p.title,content:publicTrainingContent(JSON.parse(p.content)),status:p.status,revision:p.revision});
 export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={}}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
@@ -54,10 +55,10 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(updated.changes!==1)deny(409,'Dados mudaram. Recarregue antes de salvar.');
       await audit(actor,row.id,event);await sla.changed(actor,row.id,body.revision+1);return {status:200,data:{student:studentDTO(await student(actor,row.id),actor)}};});
   }
-  async function read(req){
+  async function read(req,limit=16384){
     if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))deny(415,'Envie JSON.');
-    if(Number(req.headers['content-length']||0)>16384)deny(413,'Limite de entrada: 16 KB.');
-    let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>16384)deny(413,'Limite de entrada: 16 KB.');chunks.push(chunk);}
+    if(Number(req.headers['content-length']||0)>limit)deny(413,'Limite de entrada excedido.');
+    let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>limit)deny(413,'Limite de entrada excedido.');chunks.push(chunk);}
     try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{deny(400,'JSON inválido.');}
   }
   function studentWork(actor,body){
@@ -67,11 +68,12 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   }
   async function planWork(actor,id,body){
     const row=await student(actor,id);
-          trainingManager(actor,row);exact(body,Object.hasOwn(body,'daysPerWeek')?['title','exercises','daysPerWeek']:['title','exercises']);const daysPerWeek=body.daysPerWeek??3;if(!Number.isInteger(daysPerWeek)||daysPerWeek<1||daysPerWeek>7)deny(400,'Frequência semanal inválida.');const title=text(body.title,2,100);if(!Array.isArray(body.exercises)||body.exercises.length<1||body.exercises.length>12)deny(400,'Use 1–12 exercícios.');
+          trainingManager(actor,row);exact(body,[...(['title','exercises']),...(Object.hasOwn(body,'daysPerWeek')?['daysPerWeek']:[]),...(Object.hasOwn(body,'instructions')?['instructions']:[])]);const instructions=Object.hasOwn(body,'instructions')?text(body.instructions,0,2000):'';const daysPerWeek=body.daysPerWeek??3;if(!Number.isInteger(daysPerWeek)||daysPerWeek<1||daysPerWeek>7)deny(400,'Frequência semanal inválida.');const title=text(body.title,2,100);if(!Array.isArray(body.exercises)||body.exercises.length<1||body.exercises.length>12)deny(400,'Use 1–12 exercícios.');
           const exercises=body.exercises.map(e=>{exact(e,['name','sets','reps']);if(!Number.isInteger(e.sets)||e.sets<1||e.sets>10||!Number.isInteger(e.reps)||e.reps<1||e.reps>50)deny(400,'Séries ou repetições inválidas.');return {name:text(e.name,2,100),sets:e.sets,reps:e.reps};});
 
-    return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
+    return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek,...(instructions?{instructions}:{})}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
   }
+  const manualTraining=manualTrainingFlow({store,deny,exact,text,read,mutation,student,trainingManager,audit,publicPlan});
   const intake=anamnesisFlow({store,now,deny,exact,read,mutation,student,audit,changed:(...args)=>sla.changed(...args,'anamnesis'),start:(...args)=>sla.start(...args)});
   const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit,intakeState:intake.state});
   const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
@@ -104,6 +106,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const manualResult=await manualTraining.handle(actor,req,route);if(manualResult){if(manualResult.binary){res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename="'+manualResult.filename+'"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"sandbox; default-src 'none'"});return res.end(manualResult.binary);}return send(manualResult.status,manualResult.data);}
       const safetyResult=await trainingSafetyFlow.handle(actor,req,route);if(safetyResult)return send(safetyResult.status,safetyResult.data);
       const proposalResult=await trainingProposal.handle(actor,auth,req,route);if(proposalResult)return send(proposalResult.status,proposalResult.data);
       const intakeResult=await intake.handle(actor,req,route);if(intakeResult)return send(intakeResult.status,intakeResult.data);
@@ -152,7 +155,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
           });return send(result.status,result.data);
         }
         if(studentMatch[2]==='/onboarding'&&req.method==='PUT'){trainingManager(actor,row);const result=await saveOnboarding(actor,req,row,await read(req),'onboarding.recorded');return send(result.status,result.data);}
-        if(studentMatch[2]==='/plans'&&req.method==='GET'){const plans=await store.all('SELECT * FROM plans WHERE student_id=?'+(actor.role==='student'?" AND status='published'":'')+' ORDER BY id DESC',row.id);return send(200,{plans:plans.map(publicPlan)});}
+        if(studentMatch[2]==='/plans'&&req.method==='GET'){const plans=await store.all('SELECT * FROM plans WHERE student_id=?'+(actor.role==='student'?" AND status='published'":'')+' ORDER BY published_at DESC,id DESC',row.id);return send(200,{plans:plans.map(publicPlan)});}
         if(studentMatch[2]==='/plans'&&req.method==='POST'){
           const body=await read(req);const result=await mutation(actor,req,body,await planWork(actor,row.id,body));return send(result.status,result.data);
         }

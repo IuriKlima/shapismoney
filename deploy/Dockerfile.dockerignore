@@ -23,3 +23,5 @@
 !public/sim/supervision-ui.js
 
 !public/sim/training-proposals-ui.js
+
+!public/sim/manual-training-ui.js

@@ -77,6 +77,8 @@ Homologação HTTPS restrita: usar `SIM_DEPLOYMENT_STAGE=staging`, IPs exatos em
 
 ## Administração de alunos e treino
 
+O piloto manual também aceita PDF privado de até 1 MB, com download autenticado após publicação, e cria novas versões editáveis de treinos já publicados sem alterar execuções anteriores. Consulte o [fluxo manual, persistência e liberação](docs/manual-training-pilot.md).
+
 O administrador autenticado pode cadastrar alunos, registrar onboarding informado por eles e conduzir treino manual de rascunho até revisão, aprovação e publicação, somente na própria organização. O personal continua limitado aos seus alunos vinculados. O servidor verifica o papel na sessão; alterações de onboarding e treino exigem revisão atual e chave de idempotência, com auditoria. O onboarding direto do aluno continua restrito à própria conta.
 
 Cadastro não cria conta, senha ou convite para o aluno. O administrador não recebe papel de nutricionista nem acesso à IA profissional automaticamente. Recuperação de senha, nutrição persistente e uploads seguem pendentes. Primeiro administrador continua exigindo bootstrap interativo e aprovação; não há seed ou conta automática.

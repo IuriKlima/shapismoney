@@ -1,3 +1,4 @@
+import {trainingPDFBytes} from './manual-training-fixtures.mjs';
 import {syntheticTrainingConfiguration,syntheticTrainingBudget} from './training-proposal-fixtures.mjs';
 import {TRAINING_PROPOSAL_PURPOSE} from '../backend/training-safety.mjs';
 import {INTAKE_VERSION,CONSENT_VERSION} from '../public/sim/intake-fields.js';
@@ -86,6 +87,10 @@ test('PostgreSQL limitado: admin cadastra/onboarda/publica treino, sem acesso a 
       const result=await owner.request('plans/'+plan.id+'/'+action,{revision:plan.revision});assert.equal(result.status,200);plan=result.data.plan;
     }
     assert.equal(plan.status,'published');
+    const before=await store.get('SELECT * FROM plans WHERE id=?',plan.id),versionBody={revision:plan.revision,title:'Versão manual PG',daysPerWeek:3,exercises:[{name:'Novo exemplo',sets:2,reps:8}],instructions:'Orientação profissional manual.',changeReason:'Revisão profissional do plano publicado.',confirmed:true};
+    const newer=await owner.request('plans/'+plan.id+'/version',versionBody);assert.equal(newer.status,201);assert.equal(newer.data.plan.status,'draft');assert.deepEqual(await store.get('SELECT * FROM plans WHERE id=?',plan.id),before);assert.equal((await external.request('plans/'+plan.id+'/version',versionBody)).status,404);
+    const pdf=trainingPDFBytes(),pdfInput={title:'Arquivo privado PG',daysPerWeek:3,filename:'treino.pdf',mime:'application/pdf',base64:pdf.toString('base64'),confirmed:true};
+    const uploaded=await owner.request('students/'+student.id+'/training-pdf',pdfInput);assert.equal(uploaded.status,201);assert.ok(!JSON.stringify(uploaded.data).includes(pdfInput.base64));assert.equal((await external.request('students/'+student.id+'/training-pdf',pdfInput)).status,404);assert.equal(JSON.parse((await store.get('SELECT content FROM plans WHERE id=?',uploaded.data.plan.id)).content).attachment.base64,pdfInput.base64);assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM schema_migrations')).n,7);
     assert.equal((await owner.request('ai',{scenario:'method',syntheticConsent:true})).status,503);
     assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users')).n,2);
     await assert.rejects(()=>store.query('CREATE TABLE forbidden_admin_test(id INTEGER)'));

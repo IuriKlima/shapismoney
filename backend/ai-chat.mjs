@@ -1,4 +1,5 @@
 import {randomUUID,createHash} from 'node:crypto';
+import {publicTrainingContent} from './manual-training.mjs';
 
 const object=properties=>({type:'object',properties,required:Object.keys(properties),additionalProperties:false});
 const short={type:'string',maxLength:2000};
@@ -57,7 +58,7 @@ export function aiChatFlow({store,now,deny,exact,text,read,mutation,student,audi
   async function context(actor,s){
     if(!s.studentId)return {publishedPlans:[],scope:'administrative-registration',methodology:'Original documents reviewed locally; full corpus is not connected.'};
     const row=await student(actor,s.studentId);const plans=await store.all("SELECT id,title,content,revision FROM plans WHERE student_id=? AND status='published' ORDER BY id LIMIT 3",row.id);
-    return {studentId:row.id,publishedPlans:plans.map(p=>({id:p.id,title:p.title,revision:p.revision,...JSON.parse(p.content)})),scope:actor.role==='student'?'own-published-plan':'selected-authorized-student',methodology:'Full original corpus is not connected.'};
+    return {studentId:row.id,publishedPlans:plans.map(p=>({id:p.id,title:p.title,revision:p.revision,...publicTrainingContent(JSON.parse(p.content))})),scope:actor.role==='student'?'own-published-plan':'selected-authorized-student',methodology:'Full original corpus is not connected.'};
   }
   return {capability,close(){clearInterval(cleanup);sessions.clear();reports.clear();},clearAuth(hash){for(const [id,s] of sessions)if(s.authHash===hash)sessions.delete(id);},async handle(actor,auth,req,route){
     if(!route.startsWith('/api/local/ai/chat'))return null;
