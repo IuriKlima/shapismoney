@@ -20,4 +20,4 @@ Checkpoint 8/10/2026. Esta matriz descreve evidência e faltas; staging restrito
 
 Ordem seguinte: método original e nutrição persistente → vídeos/arquivos → operação/atendimento → Asaas final. Desenvolver/testar/publicar incrementos sem ligar consumo ou transmitir dados reais automaticamente. Pendências de conteúdo ou credenciais não bloqueiam implementação de contratos e mocks; bloqueiam somente sua ativação real.
 
-Orçamento IA aprovado: US$1 por aluno por mês, com alertas administrativos e aporte interno manual auditado. Implementação mensal ainda pendente; o ledger existente é cumulativo por instalação e não representa saldo externo da OpenAI. Nenhuma recarga ou ativação real realizada.
+Orçamento IA aprovado: US$1 por aluno por mês, com alertas administrativos e aporte interno manual auditado. Ledger mensal e painel implementados/testados localmente com migração 005 separada; modo legado cumulativo fica explícito. Aplicação das migrações 004/005 e QA móvel continuam pendentes. Não representa saldo externo da OpenAI. Nenhuma recarga ou ativação real realizada.

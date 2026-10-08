@@ -1,3 +1,4 @@
+import {monthlyBudget} from './ai-monthly-budget.mjs';
 import {nutritionFlow} from './nutrition.mjs';
 import {aiChatFlow} from './ai-chat.mjs';
 import {executionFlow} from './execution.mjs';
@@ -69,7 +70,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
 
     return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
   }
-  const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,configuration:chat});
+  const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
+  const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
   const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student,audit});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student});
@@ -95,6 +97,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const budgetResult=await budget.handle(actor,req,route);if(budgetResult)return send(budgetResult.status,budgetResult.data);
       const chatResult=await chatFlow.handle(actor,auth,req,route);if(chatResult)return send(chatResult.status,chatResult.data);
       if(route==='/api/local/ai/capabilities'&&req.method==='GET')return send(200,aiCapabilities(actor.role,ai));
       if(route==='/api/local/ai'&&req.method==='POST'){if(!['coach','nutrition'].includes(actor.role))deny(403,'IA restrita a profissionais autenticados.');return await askAI(req,res);}

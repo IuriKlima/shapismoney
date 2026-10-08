@@ -34,7 +34,7 @@ test('cadastro validado, dedup/idempotência/auditoria e persistência após rei
   const created=await c.request('students',data,'POST',{'Idempotency-Key':key});assert.equal(created.status,201);assert.equal(created.data.accountProvisioned,false);const id=created.data.student.id;
   assert.deepEqual((await c.request('students',data,'POST',{'Idempotency-Key':key})).data,created.data);assert.equal((await c.request('students',{...data,name:'Outro pedido'},'POST',{'Idempotency-Key':key})).status,409);assert.equal((await c.request('students',{...data,email:'new@fixture.invalid'})).status,409);
   const audit=await c.request('audit');assert.equal(audit.data.audit.filter(a=>a.event==='student.created'&&a.student_id===id).length,1);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM users').count,7);
-  await f.restart();assert.equal((await c.request('session')).status,200);assert.equal((await c.request('students/'+id)).data.student.name,data.name);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM schema_migrations').count,4);
+  await f.restart();assert.equal((await c.request('session')).status,200);assert.equal((await c.request('students/'+id)).data.student.name,data.name);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM schema_migrations').count,5);
 }));
 test('onboarding salva no servidor; revisão antes de publicar e aluno só vê aprovado/publicado',async()=>withFixture(async f=>{
   const c=f.client(),s=f.client(),n=f.client(),other=f.client();for(const [client,role] of [[c,'coach'],[s,'student'],[n,'nutrition'],[other,'otherStudent']])await client.login(role);

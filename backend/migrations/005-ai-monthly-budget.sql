@@ -1,0 +1,5 @@
+CREATE TABLE ai_monthly_reservations(id TEXT PRIMARY KEY,org_id TEXT NOT NULL REFERENCES organizations(id),actor_id TEXT NOT NULL REFERENCES users(id),student_id TEXT REFERENCES students(id),cycle TEXT NOT NULL,amount_micros INTEGER NOT NULL CHECK(amount_micros>0),request_key TEXT NOT NULL,request_hash TEXT NOT NULL,metadata TEXT NOT NULL,created_at INTEGER NOT NULL,UNIQUE(actor_id,request_key));
+CREATE TABLE ai_monthly_allocations(id TEXT PRIMARY KEY,org_id TEXT NOT NULL REFERENCES organizations(id),student_id TEXT NOT NULL REFERENCES students(id),cycle TEXT NOT NULL,amount_micros INTEGER NOT NULL CHECK(amount_micros>0),actor_id TEXT NOT NULL REFERENCES users(id),reason TEXT NOT NULL,created_at INTEGER NOT NULL);
+CREATE TABLE ai_budget_alerts(org_id TEXT NOT NULL REFERENCES organizations(id),scope_id TEXT NOT NULL,cycle TEXT NOT NULL,threshold INTEGER NOT NULL CHECK(threshold IN (70,90,100)),created_at INTEGER NOT NULL,PRIMARY KEY(org_id,scope_id,cycle,threshold));
+CREATE INDEX ai_reservations_cycle ON ai_monthly_reservations(cycle,org_id,student_id);
+CREATE INDEX ai_allocations_cycle ON ai_monthly_allocations(cycle,org_id,student_id);

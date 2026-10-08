@@ -20,14 +20,15 @@ export function responsesChatAdapter({apiKey,fetchImpl=fetch,model='gpt-6-luna'}
 }
 export function chatRuntimeConfiguration(env,ai,{now=Date.now()}={}){
   // Prices must be reviewed and explicitly supplied; never silently assume a perpetual tariff.
-  const budgetUSD=Number(env.SIM_AI_CHAT_BUDGET_USD||0),inputRate=Number(env.SIM_AI_CHAT_INPUT_USD_PER_MILLION),outputRate=Number(env.SIM_AI_CHAT_OUTPUT_USD_PER_MILLION);
+  const budgetMode=env.SIM_AI_CHAT_BUDGET_MODE||'monthly-per-student',globalMonthlyUSD=Number(env.SIM_AI_CHAT_GLOBAL_MONTHLY_BUDGET_USD||0),adminMonthlyUSD=Number(env.SIM_AI_CHAT_ADMIN_MONTHLY_BUDGET_USD||0);
+  const budgetUSD=budgetMode==='monthly-per-student'?globalMonthlyUSD:Number(env.SIM_AI_CHAT_BUDGET_USD||0),inputRate=Number(env.SIM_AI_CHAT_INPUT_USD_PER_MILLION),outputRate=Number(env.SIM_AI_CHAT_OUTPUT_USD_PER_MILLION);
   const model=env.SIM_AI_CHAT_MODEL,reviewedAt=Date.parse(env.SIM_AI_CHAT_PRICE_REVIEWED_AT||''),expiresAt=Date.parse(env.SIM_AI_CHAT_UNTIL||'');
   const authorizedUserIds=(env.SIM_AI_CHAT_USER_IDS||'').split(',').filter(Boolean);
   const configurationValid=model==='gpt-6-luna'&&Number.isFinite(inputRate)&&inputRate>0&&inputRate<=100&&Number.isFinite(outputRate)&&outputRate>0&&outputRate<=100&&Number.isFinite(reviewedAt)&&reviewedAt<=now&&now-reviewedAt<=30*86400000&&expiresAt>now&&expiresAt-now<=7*86400000&&authorizedUserIds.length>0&&authorizedUserIds.length<=10&&authorizedUserIds.every(id=>/^[a-f0-9-]{36}$/.test(id));
-  const enabled=env.SIM_AI_ENABLED==='true'&&env.SIM_AI_CHAT_ENABLED==='true'&&env.SIM_AI_CHAT_REVIEWED==='true'&&configurationValid&&Number.isFinite(budgetUSD)&&budgetUSD>0&&budgetUSD<=5;
-  return {enabled,budgetUSD,inputRate,outputRate,model,expiresAt,priceValidUntil:reviewedAt+30*86400000,authorizedUserIds,generate:enabled?responsesChatAdapter({apiKey:ai.apiKey,model}):null};
+  const enabled=env.SIM_AI_ENABLED==='true'&&env.SIM_AI_CHAT_ENABLED==='true'&&env.SIM_AI_CHAT_REVIEWED==='true'&&configurationValid&&Number.isFinite(budgetUSD)&&budgetUSD>0&&(budgetMode==='legacy-review'?budgetUSD<=5:budgetMode==='monthly-per-student'&&globalMonthlyUSD<=100000&&adminMonthlyUSD>0&&adminMonthlyUSD<=globalMonthlyUSD);
+  return {enabled,budgetMode,globalMonthlyUSD,adminMonthlyUSD,budgetUSD,inputRate,outputRate,model,expiresAt,priceValidUntil:reviewedAt+30*86400000,authorizedUserIds,generate:enabled?responsesChatAdapter({apiKey:ai.apiKey,model}):null};
 }
-export function aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,configuration={}}){
+export function aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration={}}){
   const sessions=new Map(),reports=new Map();const ttl=20*60*1000;
   const capability=actor=>({available:['admin','student'].includes(actor.role)&&(!configuration.authorizedUserIds||configuration.authorizedUserIds.includes(actor.id))&&(!configuration.expiresAt||now()<configuration.expiresAt)&&(!configuration.priceValidUntil||now()<configuration.priceValidUntil)&&configuration.enabled===true&&typeof configuration.generate==='function'&&Number.isFinite(configuration.budgetUSD)&&configuration.budgetUSD>0,mode:'reviewed-chat',retention:'memory-20-minutes',reportsAudience:'organization-admins',writesRequireConfirmation:true});
   const prune=()=>{for(const [id,s] of sessions)if(s.expiresAt<=now())sessions.delete(id);for(const [id,r] of reports)if(r.expiresAt<=now())reports.delete(id);};
@@ -40,17 +41,18 @@ export function aiChatFlow({store,now,deny,exact,text,read,mutation,student,audi
     if(value.action!==null){if(actor.role!=='admin')deny(502,'A IA tentou uma ação fora do seu acesso.');exact(value.action,['type','name','email','internalNote','title','daysPerWeek','exercises']);if(!['create-student','draft-plan'].includes(value.action.type))deny(502,'Ação da IA não permitida.');noSecrets(JSON.stringify(value.action));}
     return {reply,inferences,action:value.action};
   };
-  async function reserve(actor,input){
+  async function reserve(actor,input,studentId,key){
     // Durable conservative reservation; never refunded, including timeout/refusal. Serializes across replicas.
     const inputBytes=Buffer.byteLength(JSON.stringify(input)+instructions+JSON.stringify(chatSchema));if(inputBytes>18000)deny(413,'Conversa atingiu o limite de contexto. Comece outra conversa.');
     // UTF-8 byte count upper-bounds tokens; use conservative input/cache-write and output prices.
     if(!Number.isFinite(configuration.inputRate)||configuration.inputRate<=0||!Number.isFinite(configuration.outputRate)||configuration.outputRate<=0)deny(503,'Tarifas da IA não revisadas.');
     const reservedUSD=((inputBytes+2048)*configuration.inputRate+700*configuration.outputRate)/1000000;
-    await store.transaction(async()=>{await store.lockAIBudget();await store.lockActor(actor.id);const active=await store.get('SELECT active,org_id,role FROM users WHERE id=?',actor.id);if(!active?.active||active.org_id!==actor.org_id||active.role!==actor.role)deny(401,'Acesso mudou. Entre novamente.');
+    let monthlyReservation;await store.transaction(async()=>{await store.lockActor(actor.id);await store.lockAIBudget();const active=await store.get('SELECT active,org_id,role FROM users WHERE id=?',actor.id);if(!active?.active||active.org_id!==actor.org_id||active.role!==actor.role)deny(401,'Acesso mudou. Entre novamente.');
       const rows=await store.all("SELECT actor_id,result FROM operations WHERE operation_key LIKE 'ai-budget-%'");let spent=0,recent=0;for(const row of rows){const value=JSON.parse(row.result);if(!Number.isFinite(value.reservedUSD)||value.reservedUSD<0)deny(503,'Controle de orçamento indisponível.');spent+=value.reservedUSD;if(row.actor_id===actor.id&&value.createdAt>now()-60000)recent++;}
-      if(recent>=5)deny(429,'Limite de cinco mensagens por minuto.');if(spent+reservedUSD>configuration.budgetUSD)deny(503,'Orçamento da IA indisponível ou esgotado.');
-      await store.run('INSERT INTO operations VALUES (?,?,?,?,?)',actor.id,'ai-budget-'+randomUUID(),createHash('sha256').update('ai-chat-reservation').digest('hex'),202,JSON.stringify({reservedUSD,createdAt:now(),model:configuration.model||'mock',promptVersion:'sim-chat-v1-2026-10-08',inputUpperTokens:inputBytes+2048,maxOutputTokens:700,inputUSDPerMillion:configuration.inputRate,outputUSDPerMillion:configuration.outputRate}));
-    });return reservedUSD;
+      if(recent>=5)deny(429,'Limite de cinco mensagens por minuto.');if(!budget?.enabled&&spent+reservedUSD>configuration.budgetUSD)deny(503,'Orçamento da IA indisponível ou esgotado.');
+      if(budget?.enabled){monthlyReservation=await budget.reserveLocked(actor,studentId,reservedUSD,key,input);if(monthlyReservation.blocked)return;}
+      await store.run('INSERT INTO operations VALUES (?,?,?,?,?)',actor.id,'ai-budget-'+randomUUID(),createHash('sha256').update('ai-chat-reservation').digest('hex'),202,JSON.stringify({...(budget?.enabled?{budgetMode:'monthly-per-student',monthlyReservationId:monthlyReservation.id,studentId}:{}),reservedUSD,createdAt:now(),model:configuration.model||'mock',promptVersion:'sim-chat-v1-2026-10-08',inputUpperTokens:inputBytes+2048,maxOutputTokens:700,inputUSDPerMillion:configuration.inputRate,outputUSDPerMillion:configuration.outputRate}));
+    });if(monthlyReservation?.blocked){await budget.recordBlocked(actor,monthlyReservation);deny(503,'Verba interna da IA atingiu o limite de reserva. Seus planos publicados continuam disponíveis. Procure o responsável; não geramos uma resposta substituta.');}return reservedUSD;
   }
   async function context(actor,s){
     if(!s.studentId)return {publishedPlans:[],scope:'administrative-registration',methodology:'Original documents reviewed locally; full corpus is not connected.'};
@@ -73,7 +75,7 @@ export function aiChatFlow({store,now,deny,exact,text,read,mutation,student,audi
     const s=owner(actor,auth,body.sessionId);
     if(route==='/api/local/ai/chat/message'){
       exact(body,['sessionId','message']);const message=text(body.message,1,1200);noSecrets(message);if(s.busy)deny(429,'Uma mensagem já está em andamento.');if(s.messages.length>=12)deny(413,'Limite de seis mensagens. Comece outra conversa.');s.busy=true;
-      try{const facts=await context(actor,s);const input={role:actor.role,untrustedContext:facts,untrustedHistory:s.messages,untrustedMessage:message};const reservedUSD=await reserve(actor,input);let output;
+      try{const facts=await context(actor,s);const input={role:actor.role,untrustedContext:facts,untrustedHistory:s.messages,untrustedMessage:message};const reservedUSD=await reserve(actor,input,s.studentId,req.headers['idempotency-key']);let output;
         try{output=validateOutput(await configuration.generate(input),actor);}catch(error){if(error.status)throw error;deny(502,'A IA não concluiu a resposta. Não houve ação nem repetição automática.');}
         owner(actor,auth,s.id);await studentAccessRecheck();
         let proposal=null;if(output.action){const a=output.action;let payload,work;
