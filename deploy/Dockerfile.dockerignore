@@ -7,6 +7,9 @@
 !public/sim/
 !public/sim/persistent.html
 !public/sim/persistent.js
+!public/sim/crm-ui.js
+!public/sim/budget-ui.js
+!public/sim/nutrition-ui.js
 !public/sim/style.css
 !public/sim/logo.svg
 !deploy/
