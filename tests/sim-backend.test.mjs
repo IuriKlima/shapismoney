@@ -168,3 +168,22 @@ test('synthetic acceptance: registration, separate invitations, assignment, acti
   assert.equal((await recipient.request('ranking/preferences',{enabled:true,alias:'Acceptance participant',revision:0},'PUT')).status,200);assert.equal((await admin.request('ranking')).data.entries[0].consistency,33);
   await f.restart();assert.equal((await recipient.request('students/'+id+'/plans')).data.plans[0].status,'published');assert.equal((await recipient.request('workouts/current')).data.workout.completed,true);assert.equal((await recipient.request('ranking/preferences',{enabled:false,alias:'',revision:1},'PUT')).status,200);assert.equal((await admin.request('ranking')).data.entries.length,0);
 },{loginLimit:30}));
+
+test('capabilities autenticadas refletem a configuração sem ampliar papéis ou chamar o provedor',async()=>{
+  for(const enabled of [false,true]){
+    let calls=0;
+    await withFixture(async f=>{
+      assert.equal((await f.client().request('ai/capabilities')).status,401);
+      for(const role of ['admin','student','coach','nutrition']){
+        const client=f.client();await client.login(role);
+        const response=await client.request('ai/capabilities');assert.equal(response.status,200);
+        const permitted=['coach','nutrition'].includes(role);
+        assert.deepEqual(response.data,{available:enabled&&permitted,reason:!permitted?'role-restricted':enabled?'available':'disabled',mode:'synthetic-development',writesPerformed:false});
+        assert.ok(!JSON.stringify(response.data).includes('fixture-ai-credential'));
+        if(!permitted)assert.equal((await client.request('ai',{scenario:'method',syntheticConsent:true})).status,403);
+        else if(!enabled)assert.equal((await client.request('ai',{scenario:'method',syntheticConsent:true})).status,503);
+      }
+      assert.equal(calls,0);
+    },{loginLimit:30,ai:{apiKey:enabled?'fixture-ai-credential':'',fetchImpl:async()=>{calls++;throw Error('Provider must not run during capability checks');}}});
+  }
+});

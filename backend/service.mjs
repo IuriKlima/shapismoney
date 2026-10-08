@@ -1,4 +1,5 @@
 import {executionFlow} from './execution.mjs';
+import {aiCapabilities} from './ai-config.mjs';
 import {invitationFlow} from './invitations.mjs';
 import {assertRequest,localSecurity,cookieHeader} from './security.mjs';
 import {createDevAIHandler} from '../prototype/dev-ai.mjs';
@@ -78,6 +79,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      if(route==='/api/local/ai/capabilities'&&req.method==='GET')return send(200,aiCapabilities(actor.role,ai));
       if(route==='/api/local/ai'&&req.method==='POST'){if(!['coach','nutrition'].includes(actor.role))deny(403,'IA restrita a profissionais autenticados.');return await askAI(req,res);}
       if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:publicUser(actor)});
       if(route==='/api/local/logout'&&req.method==='POST'){

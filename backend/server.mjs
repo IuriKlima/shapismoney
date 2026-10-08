@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {resolveAIConfiguration} from './ai-config.mjs';
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -30,8 +31,9 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   try{
     const production=process.env.NODE_ENV==='production';const security=production?productionSecurity(process.env):localSecurity();
     const port=Number(process.env.SIM_BACKEND_PORT||'5190');if(!Number.isInteger(port)||port<1||port>65535)throw Error('Invalid application port.');
+    const ai=resolveAIConfiguration(process.env);
     let store;if(production){store=postgresStore(poolFromEnvironment());try{await verifyRuntimeRole(store);}catch(error){await store.close();throw error;}}
-    app=await createLocalServer({filename:path.resolve('.qa/local-backend/app.sqlite'),store,security,ai:{apiKey:process.env.SIM_AI_ENABLED==='true'?process.env.OPENAI_API_KEY:'',model:process.env.OPENAI_MODEL||'gpt-5.4-nano'}});
+    app=await createLocalServer({filename:path.resolve('.qa/local-backend/app.sqlite'),store,security,ai});
     app.server.listen(port,production?'0.0.0.0':'127.0.0.1',()=>console.log('SIM backend started | '+(production?'PostgreSQL / trusted HTTPS proxy':'local loopback / no accounts provisioned')));
     for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>app.close().then(()=>process.exit(0)));
   }catch{console.error('SIM startup failed: validate PostgreSQL roles/migrations, HTTPS origin, proxy and required environment. No fallback was started.');process.exitCode=1;}
