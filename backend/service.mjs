@@ -1,3 +1,4 @@
+import {anamnesisFlow} from './anamnesis.mjs';
 import {serviceFlow} from './service-sla.mjs';
 import {monthlyBudget} from './ai-monthly-budget.mjs';
 import {nutritionFlow} from './nutrition.mjs';
@@ -71,7 +72,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
 
     return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
   }
-  const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit});
+  const intake=anamnesisFlow({store,now,deny,exact,read,mutation,student,audit,changed:(...args)=>sla.changed(...args,'anamnesis'),start:(...args)=>sla.start(...args)});
+  const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit,intakeState:intake.state});
   const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
   const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student,audit});
@@ -99,6 +101,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const intakeResult=await intake.handle(actor,req,route);if(intakeResult)return send(intakeResult.status,intakeResult.data);
       const serviceResult=await sla.handle(actor,req,route);if(serviceResult)return send(serviceResult.status,serviceResult.data);
       const budgetResult=await budget.handle(actor,req,route);if(budgetResult)return send(budgetResult.status,budgetResult.data);
       const chatResult=await chatFlow.handle(actor,auth,req,route);if(chatResult)return send(chatResult.status,chatResult.data);

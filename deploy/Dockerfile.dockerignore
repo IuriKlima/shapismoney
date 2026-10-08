@@ -7,6 +7,8 @@
 !public/sim/
 !public/sim/persistent.html
 !public/sim/persistent.js
+!public/sim/intake-fields.js
+!public/sim/intake-ui.js
 !public/sim/crm-ui.js
 !public/sim/budget-ui.js
 !public/sim/nutrition-ui.js
