@@ -1,0 +1,6 @@
+// Deliberately fictitious catalog and rules, unrelated to Bruno's private prescription.
+export function syntheticTrainingConfiguration(now=Date.now,generate){
+ const exercises=[{id:'fixture-home',name:'Movimento fictício em casa',status:'approved',environments:['Em casa (se tiver, mande fotos dos material no grupo da equipe)']},{id:'fixture-gym',name:'Movimento fictício na academia',status:'approved',environments:['Na academia']}];
+ return {enabled:true,mode:'local-simulation',expiresAt:now()+86400000,methodology:{version:'fixture-v1',status:'synthetic-fixture',rules:[{id:'fixture-context',criterion:'Regra sintética para testar referência e contexto.'}],exercises},provider:{kind:'local-simulation',generate:generate||((input)=>({title:'Proposta fictícia: '+input.untrustedFacts.main_goal,daysPerWeek:input.untrustedFacts.days,exercises:[{exerciseId:exercises.find(e=>e.environments.some(v=>input.untrustedFacts.environment.includes(v))).id,sets:2,reps:8,restSeconds:60,rir:3,reason:'Exemplo fictício compatível com o ambiente e a disponibilidade declarados.',evidence:['main_goal','environment','days'],ruleId:'fixture-context'}]}))}};
+}
+export const syntheticTrainingBudget={budgetMode:'monthly-per-student',globalMonthlyUSD:.1,adminMonthlyUSD:.1,inputRate:.125,outputRate:.5};

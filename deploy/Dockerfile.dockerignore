@@ -21,3 +21,5 @@
 **/secrets/**
 
 !public/sim/supervision-ui.js
+
+!public/sim/training-proposals-ui.js

@@ -1,3 +1,5 @@
+import {trainingSafety} from './training-safety.mjs';
+import {trainingProposalFlow} from './training-proposals.mjs';
 import {supervisionFlow} from './supervision.mjs';
 import {anamnesisFlow} from './anamnesis.mjs';
 import {serviceFlow} from './service-sla.mjs';
@@ -16,7 +18,7 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:JSON.parse(p.content),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={}}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
   async function session(req){
@@ -73,6 +75,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const intake=anamnesisFlow({store,now,deny,exact,read,mutation,student,audit,changed:(...args)=>sla.changed(...args,'anamnesis'),start:(...args)=>sla.start(...args)});
   const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit,intakeState:intake.state});
   const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
+  const trainingSafetyFlow=trainingSafety({store,now,deny,exact,text,read,mutation,student,audit});
+  const trainingProposal=trainingProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,safety:trainingSafetyFlow,security,configuration:trainingProposals,budgetConfiguration:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
   const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student,audit});
   const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
@@ -100,6 +104,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const safetyResult=await trainingSafetyFlow.handle(actor,req,route);if(safetyResult)return send(safetyResult.status,safetyResult.data);
+      const proposalResult=await trainingProposal.handle(actor,auth,req,route);if(proposalResult)return send(proposalResult.status,proposalResult.data);
       const intakeResult=await intake.handle(actor,req,route);if(intakeResult)return send(intakeResult.status,intakeResult.data);
       const supervisionResult=await supervision.handle(actor,req,route);if(supervisionResult)return send(supervisionResult.status,supervisionResult.data);
       const serviceResult=await sla.handle(actor,req,route);if(serviceResult)return send(serviceResult.status,serviceResult.data);
@@ -109,7 +115,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/ai'&&req.method==='POST'){deny(503,'Rota antiga de IA desativada. Use o chat autorizado.');}
       if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:publicUser(actor)});
       if(route==='/api/local/logout'&&req.method==='POST'){
-        const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
+        const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);trainingProposal.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
       const nutritionResult=await nutrition.handle(actor,req,route);if(nutritionResult)return send(nutritionResult.status,nutritionResult.data);
       const executionResult=await execution.handle(actor,req,route);if(executionResult)return send(executionResult.status,executionResult.data);
@@ -155,7 +161,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(planMatch&&req.method==='POST'){
         const plan=await store.get('SELECT * FROM plans WHERE id=?',planMatch[1]);if(!plan)deny(404,'Plano não encontrado.');const row=await student(actor,plan.student_id);trainingManager(actor,row);const body=await read(req);exact(body,['revision']);
         const result=await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const current=await store.get('SELECT * FROM plans WHERE id=?',plan.id);if(body.revision!==current.revision)deny(409,'Plano mudou. Recarregue.');
-          const action=planMatch[2];const required={submit:'draft',approve:'review',publish:'approved'}[action];if(current.status!==required)deny(409,'Revisão profissional obrigatória antes de publicar.');
+          const action=planMatch[2];if(['approve','publish'].includes(action)){await trainingSafetyFlow.assertPublishable(actor,await student(actor,row.id));await trainingProposal.assertPlanApproval(actor,current);}
+          const required={submit:'draft',approve:'review',publish:'approved'}[action];if(current.status!==required)deny(409,'Revisão profissional obrigatória antes de publicar.');
           let updated;
           if(action==='approve')updated=await store.run("UPDATE plans SET status='approved',approved_by=?,approved_revision=revision,revision=revision+1 WHERE id=? AND revision=? AND status=?",actor.id,plan.id,body.revision,required);
           else if(action==='publish'){if(!current.approved_by||current.approved_revision!==current.revision-1)deny(409,'Aprovação desatualizada.');updated=await store.run("UPDATE plans SET status='published',published_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=?",now(),plan.id,body.revision,required);}
@@ -169,5 +176,5 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       deny(404,'Recurso não encontrado. Uploads ainda indisponíveis.');
     }catch(error){const code=error instanceof Failure||error.safe===true?error.status:['23505','SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)?409:500;send(code,{error:error instanceof Failure||error.safe===true?error.message:code===409?'Este cadastro ou operação já existe.':'Não foi possível concluir a operação.'});}
   };
-  handle.close=()=>chatFlow.close();return handle;
+  handle.close=()=>{chatFlow.close();trainingProposal.close();};return handle;
 }
