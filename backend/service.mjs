@@ -1,3 +1,4 @@
+import {nutritionFlow} from './nutrition.mjs';
 import {aiChatFlow} from './ai-chat.mjs';
 import {executionFlow} from './execution.mjs';
 import {aiCapabilities} from './ai-config.mjs';
@@ -69,6 +70,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
   }
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,configuration:chat});
+  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student,audit});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student});
   const handle=async function handle(req,res){
@@ -100,6 +102,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/logout'&&req.method==='POST'){
         const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
+      const nutritionResult=await nutrition.handle(actor,req,route);if(nutritionResult)return send(nutritionResult.status,nutritionResult.data);
       const executionResult=await execution.handle(actor,req,route);if(executionResult)return send(executionResult.status,executionResult.data);
       if(route==='/api/local/invitations'&&req.method==='POST'){const result=await invites.create(actor,req);return send(result.status,result.data);}
       if(route==='/api/local/professionals'&&req.method==='GET'){if(actor.role!=='admin')deny(403,'Equipe restrita ao administrador.');return send(200,{professionals:await store.all("SELECT id,name,role FROM users WHERE org_id=? AND active=1 AND role IN ('coach','nutrition') ORDER BY name",actor.org_id)});}
@@ -129,7 +132,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
             const updated=await store.run('UPDATE students SET coach_id=?,nutrition_id=?,revision=revision+1 WHERE id=? AND org_id=? AND revision=?',coach,nutrition,row.id,actor.org_id,body.revision);
             if(updated.changes!==1)deny(409,'Dados mudaram. Recarregue antes de atribuir.');
             if(coachChanged){await store.run("UPDATE plans SET status='draft',approved_by=NULL,approved_revision=NULL,revision=revision+1 WHERE student_id=? AND status<>'published'",row.id);await audit(actor,row.id,'assignment.coach.changed:'+current.coach_id+'>'+coach);}
-            if(nutritionChanged)await audit(actor,row.id,'assignment.nutrition.changed:'+(current.nutrition_id||'none')+'>'+(nutrition||'none'));
+            if(nutritionChanged){await store.run("UPDATE nutrition_plans SET status='draft',approved_by=NULL,approved_revision=NULL,revision=revision+1 WHERE student_id=? AND status<>'published'",row.id);await audit(actor,row.id,'assignment.nutrition.changed:'+(current.nutrition_id||'none')+'>'+(nutrition||'none'));}
             return {status:200,data:{student:studentDTO(await student(actor,row.id),actor),changed:true}};
           });return send(result.status,result.data);
         }

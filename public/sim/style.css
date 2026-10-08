@@ -842,3 +842,5 @@
 /* Chat proposals remain readable at narrow widths, including long email addresses. */
 #chat-section,.premium-confirm{overflow-wrap:anywhere;}
 #chat-section pre,.premium-confirm pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font-size:.82rem;line-height:1.6;}
+
+#nutrition-section{overflow-wrap:anywhere;}#nutrition-section fieldset{min-width:0;margin:14px 0;padding:12px;border:1px solid var(--line);border-radius:8px;}#nutrition-section legend{max-width:100%;padding:0 6px;}#nutrition-section :is(input,select,textarea){min-width:0;max-width:100%;}#nutrition-section form{margin:16px 0;}#nutrition-section .btn{margin:8px 6px 0 0;white-space:normal;}@media(max-width:400px){#nutrition-section fieldset{padding:8px;}#nutrition-section .btn{width:100%;margin-right:0;}}
