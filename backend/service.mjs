@@ -1,3 +1,4 @@
+import {invitationFlow} from './invitations.mjs';
 import {assertRequest,localSecurity,cookieHeader} from './security.mjs';
 import {createDevAIHandler} from '../prototype/dev-ai.mjs';
 import {randomUUID,createHash} from 'node:crypto';
@@ -52,6 +53,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>16384)deny(413,'Limite de entrada: 16 KB.');chunks.push(chunk);}
     try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{deny(400,'JSON inválido.');}
   }
+  const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student});
   return async function handle(req,res){
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
     try{
@@ -72,12 +74,14 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         // HTTP loopback only. Production must use HTTPS + Secure + __Host- cookie.
         res.setHeader('Set-Cookie',cookieHeader(security,token,Math.floor(sessionMs/1000)));return send(200,{user:publicUser(user)});
       }
+      if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
       if(route==='/api/local/ai'&&req.method==='POST'){if(!['coach','nutrition'].includes(actor.role))deny(403,'IA restrita a profissionais autenticados.');return await askAI(req,res);}
       if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:publicUser(actor)});
       if(route==='/api/local/logout'&&req.method==='POST'){
         const body=await read(req);exact(body,[]);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
+      if(route==='/api/local/invitations'&&req.method==='POST'){const result=await invites.create(actor,req);return send(result.status,result.data);}
       if(route==='/api/local/students'&&req.method==='GET')return send(200,{students:(await list(actor)).map(row=>studentDTO(row,actor))});
       if(route==='/api/local/students'&&req.method==='POST'){
         if(!['admin','coach'].includes(actor.role))deny(403,'Cadastro exige administrador da organização ou personal responsável.');const body=await read(req);exact(body,['name','email','internalNote']);const name=text(body.name,2,100),address=email(body.email),note=text(body.internalNote,0,1000);
@@ -113,7 +117,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/audit'&&req.method==='GET'){
         if(actor.role==='student')deny(403,'Auditoria restrita à equipe.');const ids=(await list(actor)).map(s=>s.id);const rows=(await store.all('SELECT id,actor_id,student_id,event,created_at FROM audit WHERE org_id=? ORDER BY created_at DESC LIMIT 100',actor.org_id)).filter(a=>actor.role==='admin'||a.actor_id===actor.id||ids.includes(a.student_id));return send(200,{audit:rows});
       }
-      deny(404,'Recurso não encontrado. Uploads e convites ainda indisponíveis.');
+      deny(404,'Recurso não encontrado. Uploads ainda indisponíveis.');
     }catch(error){const code=error instanceof Failure||error.safe===true?error.status:['23505','SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)?409:500;send(code,{error:error instanceof Failure||error.safe===true?error.message:code===409?'Este cadastro ou operação já existe.':'Não foi possível concluir a operação.'});}
   };
 }

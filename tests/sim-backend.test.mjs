@@ -34,7 +34,7 @@ test('cadastro validado, dedup/idempotência/auditoria e persistência após rei
   const created=await c.request('students',data,'POST',{'Idempotency-Key':key});assert.equal(created.status,201);assert.equal(created.data.accountProvisioned,false);const id=created.data.student.id;
   assert.deepEqual((await c.request('students',data,'POST',{'Idempotency-Key':key})).data,created.data);assert.equal((await c.request('students',{...data,name:'Outro pedido'},'POST',{'Idempotency-Key':key})).status,409);assert.equal((await c.request('students',{...data,email:'new@fixture.invalid'})).status,409);
   const audit=await c.request('audit');assert.equal(audit.data.audit.filter(a=>a.event==='student.created'&&a.student_id===id).length,1);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM users').count,7);
-  await f.restart();assert.equal((await c.request('session')).status,200);assert.equal((await c.request('students/'+id)).data.student.name,data.name);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM schema_migrations').count,1);
+  await f.restart();assert.equal((await c.request('session')).status,200);assert.equal((await c.request('students/'+id)).data.student.name,data.name);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM schema_migrations').count,2);
 }));
 test('onboarding salva no servidor; revisão antes de publicar e aluno só vê aprovado/publicado',async()=>withFixture(async f=>{
   const c=f.client(),s=f.client(),n=f.client(),other=f.client();for(const [client,role] of [[c,'coach'],[s,'student'],[n,'nutrition'],[other,'otherStudent']])await client.login(role);
@@ -97,3 +97,31 @@ test('admin gere cadastro, onboarding e treino somente na própria organização
   assert.ok(audit.some(e=>e.actor_id===f.ids.admin&&e.event==='plan.publish'));
   assert.ok(!audit.some(e=>e.student_id===external.data.student.id));
 },{loginLimit:40}));
+
+test('convites: cadastro→ativação→login→onboarding; whitelist, isolamento e código nunca persistido',async()=>withFixture(async f=>{
+ const a=f.client(),coach=f.client(),recipient=f.client(),outside=f.client();await a.login('admin');await coach.login('coach');await outside.login('outsider');
+ const created=await a.request('students',{name:'Aluno convite fictício',email:'invite@fixture.invalid',internalNote:'Privado'});const row=created.data.student;
+ const body={kind:'student',studentId:row.id,email:row.email,name:row.name,professionalRole:null,verifiedDelivery:true};
+ assert.equal((await coach.request('invitations',body)).status,403);assert.equal((await outside.request('invitations',body)).status,403);
+ assert.equal((await a.request('invitations',{...body,org_id:'forged'})).status,400);assert.equal((await a.request('invitations',{...body,professionalRole:'admin'})).status,400);assert.equal((await a.request('invitations',{...body,email:'wrong@fixture.invalid'})).status,400);assert.equal((await a.request('invitations',{...body,verifiedDelivery:false})).status,400);
+ const key=randomUUID();const issued=await a.request('invitations',body,'POST',{'Idempotency-Key':key});assert.equal(issued.status,201);assert.equal(issued.data.emailSent,false);const token=issued.data.token;assert.match(token,/^[A-Za-z0-9_-]{43}$/);
+ assert.equal((await a.request('invitations',body,'POST',{'Idempotency-Key':key})).data.token,null);
+ assert.ok(!JSON.stringify(f.store.all('SELECT * FROM invitations')).includes(token));assert.ok(!JSON.stringify(f.store.all('SELECT * FROM operations')).includes(token));assert.ok(!JSON.stringify(f.store.all('SELECT * FROM audit')).includes(token));
+ const activation={token,email:row.email,password:FIXTURE_PASSWORD};assert.equal((await recipient.request('activate',{...activation,email:'wrong@fixture.invalid'})).status,400);assert.equal((await recipient.request('activate',{...activation,role:'admin'})).status,400);assert.equal((await recipient.request('activate',{...activation,password:'short'})).status,400);
+ const competing=await Promise.all([recipient.request('activate',activation),f.client().request('activate',activation)]);assert.deepEqual(competing.map(r=>r.status).sort(),[201,400]);assert.equal((await recipient.request('activate',activation)).status,400);
+ assert.equal((await recipient.request('login',{email:row.email,password:FIXTURE_PASSWORD})).data.user.role,'student');const own=(await recipient.request('students')).data.students;assert.equal(own.length,1);assert.equal(own[0].id,row.id);assert.ok(!JSON.stringify(own).includes('Privado'));
+ assert.equal((await recipient.request('onboarding',{goal:'Hipertrofia',days:3,experience:'Iniciante',context:'Fictício inicial',revision:own[0].revision},'PUT')).status,200);assert.equal((await recipient.request('invitations',body)).status,403);
+},{loginLimit:40}));
+
+test('convites: expiração, substituição, profissional distinto e rate limit',async()=>{
+ let clock=Date.now();await withFixture(async f=>{
+  const a=f.client(),c=f.client();await a.login('admin');const professional=(address,role='coach')=>({kind:'professional',studentId:null,email:address,name:'Profissional fictício',professionalRole:role,verifiedDelivery:true});
+  assert.equal((await a.request('invitations',professional('forged@fixture.invalid','admin'))).status,400);
+  const first=(await a.request('invitations',professional('pro@fixture.invalid'))).data;const second=(await a.request('invitations',professional('pro@fixture.invalid'))).data;
+  assert.equal((await c.request('activate',{token:first.token,email:'pro@fixture.invalid',password:FIXTURE_PASSWORD})).status,400);
+  assert.equal((await c.request('activate',{token:second.token,email:'pro@fixture.invalid',password:FIXTURE_PASSWORD})).status,201);
+  assert.equal((await c.request('login',{email:'pro@fixture.invalid',password:FIXTURE_PASSWORD})).data.user.role,'coach');assert.equal((await c.request('students')).data.students.length,0);
+  const expired=(await a.request('invitations',professional('expired@fixture.invalid','nutrition'))).data;clock+=1800001;assert.equal((await f.client().request('activate',{token:expired.token,email:'expired@fixture.invalid',password:FIXTURE_PASSWORD})).status,400);assert.equal(f.store.get("SELECT COUNT(*) AS n FROM users WHERE email='expired@fixture.invalid'").n,0);
+  for(let i=0;i<7;i++)assert.equal((await f.client().request('activate',{token:'x'.repeat(43),email:'no@fixture.invalid',password:FIXTURE_PASSWORD})).status,400);assert.equal((await f.client().request('activate',{token:'x'.repeat(43),email:'no@fixture.invalid',password:FIXTURE_PASSWORD})).status,429);
+ },{now:()=>clock,loginLimit:40});
+});

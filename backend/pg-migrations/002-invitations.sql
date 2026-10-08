@@ -1,0 +1,2 @@
+CREATE TABLE invitations(id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES organizations(id), created_by TEXT NOT NULL REFERENCES users(id), email TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('student','coach','nutrition')), student_id TEXT REFERENCES students(id), token_hash TEXT NOT NULL UNIQUE, expires_at BIGINT NOT NULL, consumed_at BIGINT, CHECK((role='student' AND student_id IS NOT NULL) OR (role<>'student' AND student_id IS NULL)));
+CREATE INDEX invitations_recipient ON invitations(org_id,email);

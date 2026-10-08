@@ -16,7 +16,7 @@ async function embedded(){
 }
 test('PostgreSQL embarcado: migrations repetíveis, checksum, papel limitado e QA seed bloqueado',async()=>{
   const {db,store}=await embedded();try{
-    await migratePostgres(store);await migratePostgres(store);assert.equal((await store.all('SELECT * FROM schema_migrations')).length,1);assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users')).n,0);
+    await migratePostgres(store);await migratePostgres(store);assert.equal((await store.all('SELECT * FROM schema_migrations')).length,2);assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users')).n,0);
     await db.exec('SET ROLE sim_app');await verifyRuntimeRole(store);await assert.rejects(()=>store.query('CREATE TABLE forbidden(id INTEGER)'));await assert.rejects(()=>store.run("DELETE FROM schema_migrations"));await db.exec('RESET ROLE');
     const password=await hashPassword(FIXTURE_PASSWORD),org=randomUUID();await store.run('INSERT INTO organizations VALUES (?,?)',org,'Fictício');await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',randomUUID(),org,'qa@fixture.invalid','QA','coach',password);await db.exec('SET ROLE sim_app');await assert.rejects(()=>verifyRuntimeRole(store),/QA fixtures/);await db.exec('RESET ROLE');
     await store.run('UPDATE schema_migrations SET checksum=?','invalid-checksum');await assert.rejects(()=>migratePostgres(store),/checksum mismatch/);
@@ -87,4 +87,21 @@ test('PostgreSQL limitado: admin cadastra/onboarda/publica treino, sem acesso a 
     await assert.rejects(()=>store.query('CREATE TABLE forbidden_admin_test(id INTEGER)'));
     await assert.rejects(()=>store.run('DELETE FROM schema_migrations'));
   }finally{await app.close();}
+});
+
+test('PostgreSQL limitado: convite isolado e consumo concorrente atômico com rollback do vínculo',async()=>{
+ const {db,store}=await embedded();await migratePostgres(store);const org=randomUUID(),other=randomUUID(),admin=randomUUID(),external=randomUUID();const password=await hashPassword(FIXTURE_PASSWORD);
+ for(const id of [org,other])await store.run('INSERT INTO organizations VALUES (?,?)',id,'Org fictícia');for(const [id,tenant,address] of [[admin,org,'inviteadmin@fixture.invalid'],[external,other,'otheradmin@fixture.invalid']])await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,tenant,address,'Admin fictício','admin',password);
+ await db.exec('SET ROLE sim_app');const app=await createLocalServer({store,loginLimit:30});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+app.server.address().port;
+ const client=()=>{let cookie='';return async(path,body,method='POST')=>{const res=await fetch(origin+'/api/local/'+path,{method:body===undefined?'GET':method,headers:{Origin:origin,'Content-Type':'application/json','Idempotency-Key':randomUUID(),Cookie:cookie},body:body===undefined?undefined:JSON.stringify(body)});if(res.headers.get('set-cookie'))cookie=res.headers.get('set-cookie').split(';')[0];return {status:res.status,data:await res.json()};};};
+ try{
+  const a=client(),b=client(),recipient=client();await a('login',{email:'inviteadmin@fixture.invalid',password:FIXTURE_PASSWORD});await b('login',{email:'otheradmin@fixture.invalid',password:FIXTURE_PASSWORD});
+  const row=(await a('students',{name:'PG convidado',email:'pginvite@fixture.invalid',internalNote:'Privada'})).data.student;const body={kind:'student',studentId:row.id,email:row.email,name:row.name,professionalRole:null,verifiedDelivery:true};assert.equal((await b('invitations',body)).status,404);
+  const invite=(await a('invitations',body)).data;assert.match(invite.token,/^[A-Za-z0-9_-]{43}$/);const input={token:invite.token,email:row.email,password:FIXTURE_PASSWORD};
+  const results=await Promise.all([recipient('activate',input),client()('activate',input)]);assert.deepEqual(results.map(r=>r.status).sort(),[201,400]);assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users WHERE email=?',row.email)).n,1);
+  assert.equal((await recipient('login',{email:row.email,password:FIXTURE_PASSWORD})).data.user.role,'student');const own=(await recipient('students')).data.students[0];assert.equal(own.id,row.id);assert.equal((await recipient('onboarding',{goal:'Condicionamento',days:2,experience:'Iniciante',context:'Fictício PG',revision:own.revision},'PUT')).status,200);
+  const bad=(await a('students',{name:'Vínculo mudado',email:'mismatch@fixture.invalid',internalNote:''})).data.student;const badInvite=(await a('invitations',{...body,studentId:bad.id,email:bad.email,name:bad.name})).data;await store.run('UPDATE students SET email=? WHERE id=?','changed@fixture.invalid',bad.id);
+  assert.equal((await client()('activate',{token:badInvite.token,email:bad.email,password:FIXTURE_PASSWORD})).status,409);assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users WHERE email=?',bad.email)).n,0);assert.equal((await store.get('SELECT consumed_at FROM invitations WHERE id=?',badInvite.invitation.id)).consumed_at,null);
+  assert.ok(!JSON.stringify(await store.all('SELECT * FROM operations')).includes(invite.token));assert.ok(!JSON.stringify(await store.all('SELECT * FROM audit')).includes(invite.token));await assert.rejects(()=>store.query('CREATE TABLE forbidden_invite(id INTEGER)'));
+ }finally{await app.close();}
 });
