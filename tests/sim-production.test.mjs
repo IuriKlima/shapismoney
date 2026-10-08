@@ -25,3 +25,15 @@ test('staging HTTPS restrito funciona antes de aprovação; produção continua 
   const req={method:'POST',socket:{remoteAddress:'172.20.0.2'},headers:{host:'app.example.test',origin:'https://app.example.test','x-forwarded-proto':'https','x-forwarded-for':'203.0.113.10'}};assert.doesNotThrow(()=>assertRequest(req,security));assert.throws(()=>assertRequest({...req,headers:{...req.headers,'x-forwarded-for':'203.0.113.11'}},security),/homologação restrito/);
   for(const clients of ['', '203.0.113.0/24','*'])assert.throws(()=>productionSecurity({...staging,SIM_STAGING_CLIENT_IPS:clients}));assert.throws(()=>productionSecurity({...staging,SIM_DEPLOYMENT_STAGE:'production'}),/review flag/);assert.throws(()=>productionSecurity({...staging,SIM_PUBLIC_ORIGIN:'http://app.example.test'}));
 });
+
+test('custom upstream requires exact trusted peer, internal Host and canonical forwarded Host',()=>{
+  const security=productionSecurity({...env,SIM_DEPLOYMENT_STAGE:'staging',SIM_PRODUCTION_REVIEWED:'false',SIM_STAGING_CLIENT_IPS:'203.0.113.10',SIM_PROXY_UPSTREAM_HOST:'tasks.medsi_shape-is-money:5190'});
+  const req={method:'GET',socket:{remoteAddress:'::ffff:172.20.0.2'},headers:{host:'tasks.medsi_shape-is-money:5190','x-forwarded-host':'app.example.test','x-forwarded-proto':'https','x-forwarded-for':'203.0.113.10'}};
+  assert.equal(assertRequest(req,security).clientIP,'203.0.113.10');
+  for(const change of [{host:'other-internal:5190'},{'x-forwarded-host':'external.test'},{'x-forwarded-host':'app.example.test, external.test'},{'x-forwarded-host':undefined},{'x-forwarded-proto':'https, http'},{'x-forwarded-for':'203.0.113.11'},{'x-forwarded-for':'203.0.113.10, 172.20.0.2'}])assert.throws(()=>assertRequest({...req,headers:{...req.headers,...change}},security));
+  assert.throws(()=>assertRequest({...req,socket:{remoteAddress:'172.20.0.4'}},security));
+  assert.throws(()=>assertRequest(req,productionSecurity(env)));
+  assert.throws(()=>assertRequest({...req,method:'POST',headers:{...req.headers,origin:'https://external.test'}},security));
+  assert.equal(assertRequest({...req,method:'POST',headers:{...req.headers,origin:security.origin}},security).clientIP,'203.0.113.10');
+  for(const value of ['*','tasks.medsi_shape-is-money:5190,other:5190','http://tasks.medsi_shape-is-money:5190'])assert.throws(()=>productionSecurity({...env,SIM_PROXY_UPSTREAM_HOST:value}));
+});
