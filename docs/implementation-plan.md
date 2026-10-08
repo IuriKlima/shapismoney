@@ -25,3 +25,6 @@ O plano acima registra a etapa demonstrativa original. O acompanhamento persiste
 6. Asaas, provider escolhido pelo usuário: implementar adaptador e testes com mocks, depois sandbox com conta/token do proprietário e autorização específica. Antes da integração, verificar documentação oficial vigente para taxas, parcelamento, webhook/autenticidade e idempotência. Nenhuma conta, credencial, cobrança, contrato ou custo real é criado nesta preparação.
 
 Valores comerciais confirmados: mensal R$499; trimestral R$1.197; semestral R$1.794; vendedor absorve juros. Plano anual encaminha lead ao CRM. Não assumir taxa fixa para pagamento parcelado nem converter esses valores em cobrança sem validar duração, parcelamento, política e aceite do proprietário. A conta Asaas e os tokens de sandbox/produção continuam pendentes.
+## Incremento IA revisável
+
+Implementado chat isolado e propostas confirmáveis para admin; orientação do aluno restrita ao plano publicado, hipóteses separadas e relato à administração apenas com consentimento específico. Workers/RBAC/auditoria/idempotência existentes reutilizados. Sem chamadas pagas nos testes. Gates adicionais, orçamento durável, limitações e documentos originais consultados: [ai-chat.md](ai-chat.md). Publicação mantém IA desativada; corpus original, memória longitudinal e prescrição nutricional continuam etapas posteriores.

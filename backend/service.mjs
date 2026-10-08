@@ -1,3 +1,4 @@
+import {aiChatFlow} from './ai-chat.mjs';
 import {executionFlow} from './execution.mjs';
 import {aiCapabilities} from './ai-config.mjs';
 import {invitationFlow} from './invitations.mjs';
@@ -12,7 +13,7 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:JSON.parse(p.content),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),ai={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),ai={},chat={}}={}){
   const dummy=await hashPassword(newToken());
   const askAI=createDevAIHandler({...ai,guard:req=>assertRequest(req,security),cors:false});
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
@@ -55,9 +56,22 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>16384)deny(413,'Limite de entrada: 16 KB.');chunks.push(chunk);}
     try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{deny(400,'JSON inválido.');}
   }
+  function studentWork(actor,body){
+        if(!['admin','coach'].includes(actor.role))deny(403,'Cadastro exige administrador da organização ou personal responsável.');exact(body,['name','email','internalNote']);const name=text(body.name,2,100),address=email(body.email),note=text(body.internalNote,0,1000);
+
+    return async()=>{if(await store.get('SELECT id FROM students WHERE org_id=? AND email=?',actor.org_id,address))deny(409,'Este e-mail já está cadastrado.');const id=randomUUID();await store.run('INSERT INTO students(id,org_id,coach_id,email,name,internal_note) VALUES (?,?,?,?,?,?)',id,actor.org_id,actor.id,address,name,note);await audit(actor,id,'student.created');return {status:201,data:{student:studentDTO(await student(actor,id),actor),accountProvisioned:false}};};
+  }
+  async function planWork(actor,id,body){
+    const row=await student(actor,id);
+          trainingManager(actor,row);exact(body,Object.hasOwn(body,'daysPerWeek')?['title','exercises','daysPerWeek']:['title','exercises']);const daysPerWeek=body.daysPerWeek??3;if(!Number.isInteger(daysPerWeek)||daysPerWeek<1||daysPerWeek>7)deny(400,'Frequência semanal inválida.');const title=text(body.title,2,100);if(!Array.isArray(body.exercises)||body.exercises.length<1||body.exercises.length>12)deny(400,'Use 1–12 exercícios.');
+          const exercises=body.exercises.map(e=>{exact(e,['name','sets','reps']);if(!Number.isInteger(e.sets)||e.sets<1||e.sets>10||!Number.isInteger(e.reps)||e.reps<1||e.reps>50)deny(400,'Séries ou repetições inválidas.');return {name:text(e.name,2,100),sets:e.sets,reps:e.reps};});
+
+    return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
+  }
+  const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,configuration:chat});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student});
-  return async function handle(req,res){
+  const handle=async function handle(req,res){
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
     try{
       const connection=assertRequest(req,security);
@@ -79,19 +93,19 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const chatResult=await chatFlow.handle(actor,auth,req,route);if(chatResult)return send(chatResult.status,chatResult.data);
       if(route==='/api/local/ai/capabilities'&&req.method==='GET')return send(200,aiCapabilities(actor.role,ai));
       if(route==='/api/local/ai'&&req.method==='POST'){if(!['coach','nutrition'].includes(actor.role))deny(403,'IA restrita a profissionais autenticados.');return await askAI(req,res);}
       if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:publicUser(actor)});
       if(route==='/api/local/logout'&&req.method==='POST'){
-        const body=await read(req);exact(body,[]);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
+        const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
       const executionResult=await execution.handle(actor,req,route);if(executionResult)return send(executionResult.status,executionResult.data);
       if(route==='/api/local/invitations'&&req.method==='POST'){const result=await invites.create(actor,req);return send(result.status,result.data);}
       if(route==='/api/local/professionals'&&req.method==='GET'){if(actor.role!=='admin')deny(403,'Equipe restrita ao administrador.');return send(200,{professionals:await store.all("SELECT id,name,role FROM users WHERE org_id=? AND active=1 AND role IN ('coach','nutrition') ORDER BY name",actor.org_id)});}
       if(route==='/api/local/students'&&req.method==='GET')return send(200,{students:(await list(actor)).map(row=>studentDTO(row,actor))});
       if(route==='/api/local/students'&&req.method==='POST'){
-        if(!['admin','coach'].includes(actor.role))deny(403,'Cadastro exige administrador da organização ou personal responsável.');const body=await read(req);exact(body,['name','email','internalNote']);const name=text(body.name,2,100),address=email(body.email),note=text(body.internalNote,0,1000);
-        const result=await mutation(actor,req,body,async()=>{if(await store.get('SELECT id FROM students WHERE org_id=? AND email=?',actor.org_id,address))deny(409,'Este e-mail já está cadastrado.');const id=randomUUID();await store.run('INSERT INTO students(id,org_id,coach_id,email,name,internal_note) VALUES (?,?,?,?,?,?)',id,actor.org_id,actor.id,address,name,note);await audit(actor,id,'student.created');return {status:201,data:{student:studentDTO(await student(actor,id),actor),accountProvisioned:false}};});return send(result.status,result.data);
+        const body=await read(req);const result=await mutation(actor,req,body,studentWork(actor,body));return send(result.status,result.data);
       }
       if(route==='/api/local/onboarding'&&req.method==='PUT'){
         if(actor.role!=='student')deny(403,'Onboarding pertence ao aluno.');const row=await store.get('SELECT * FROM students WHERE user_id=? AND org_id=?',actor.id,actor.org_id);if(!row)deny(404,'Vínculo de aluno pendente.');
@@ -122,9 +136,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         if(studentMatch[2]==='/onboarding'&&req.method==='PUT'){trainingManager(actor,row);const result=await saveOnboarding(actor,req,row,await read(req),'onboarding.recorded');return send(result.status,result.data);}
         if(studentMatch[2]==='/plans'&&req.method==='GET'){const plans=await store.all('SELECT * FROM plans WHERE student_id=?'+(actor.role==='student'?" AND status='published'":'')+' ORDER BY id DESC',row.id);return send(200,{plans:plans.map(publicPlan)});}
         if(studentMatch[2]==='/plans'&&req.method==='POST'){
-          trainingManager(actor,row);const body=await read(req);exact(body,Object.hasOwn(body,'daysPerWeek')?['title','exercises','daysPerWeek']:['title','exercises']);const daysPerWeek=body.daysPerWeek??3;if(!Number.isInteger(daysPerWeek)||daysPerWeek<1||daysPerWeek>7)deny(400,'Frequência semanal inválida.');const title=text(body.title,2,100);if(!Array.isArray(body.exercises)||body.exercises.length<1||body.exercises.length>12)deny(400,'Use 1–12 exercícios.');
-          const exercises=body.exercises.map(e=>{exact(e,['name','sets','reps']);if(!Number.isInteger(e.sets)||e.sets<1||e.sets>10||!Number.isInteger(e.reps)||e.reps<1||e.reps>50)deny(400,'Séries ou repetições inválidas.');return {name:text(e.name,2,100),sets:e.sets,reps:e.reps};});
-          const result=await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};});return send(result.status,result.data);
+          const body=await read(req);const result=await mutation(actor,req,body,await planWork(actor,row.id,body));return send(result.status,result.data);
         }
       }
       const planMatch=/^\/api\/local\/plans\/([a-f0-9-]{36})\/(submit|approve|publish)$/.exec(route);
@@ -145,4 +157,5 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       deny(404,'Recurso não encontrado. Uploads ainda indisponíveis.');
     }catch(error){const code=error instanceof Failure||error.safe===true?error.status:['23505','SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)?409:500;send(code,{error:error instanceof Failure||error.safe===true?error.message:code===409?'Este cadastro ou operação já existe.':'Não foi possível concluir a operação.'});}
   };
+  handle.close=()=>chatFlow.close();return handle;
 }

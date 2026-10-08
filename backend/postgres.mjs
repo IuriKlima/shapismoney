@@ -10,6 +10,7 @@ export function postgresStore(pool){
   const context=new AsyncLocalStorage();
   const query=(sql,args=[])=>{const client=context.getStore()||pool;return client.query(numberedSQL(sql),args);};
   return {kind:'postgres',get:async(sql,...args)=>(await query(sql,args)).rows[0],all:async(sql,...args)=>(await query(sql,args)).rows,run:async(sql,...args)=>({changes:(await query(sql,args)).rowCount}),
+    lockAIBudget:async()=>{await query('SELECT pg_advisory_xact_lock(519004)');},
     lockWorkout:async id=>{await query('SELECT id FROM workouts WHERE id=? FOR UPDATE',[id]);},
     lockStudent:async id=>{await query('SELECT id FROM students WHERE id=? FOR UPDATE',[id]);},
     lockActor:async id=>{await query('SELECT id FROM users WHERE id=? FOR UPDATE',[id]);},

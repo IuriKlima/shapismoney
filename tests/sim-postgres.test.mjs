@@ -139,3 +139,17 @@ test('PostgreSQL limited runtime: persistent execution, idempotent sets and mini
   const privileges=await store.get("SELECT has_table_privilege(current_user,'workouts','INSERT,UPDATE,SELECT') AS allowed");assert.equal(privileges.allowed,true);await assert.rejects(()=>store.query('CREATE TABLE forbidden_execution(id INTEGER)'));
  }finally{await app.close();}
 });
+test('PostgreSQL IA: reservas duráveis serializadas, timeout sem refund, reinício e ledger inválido falham fechados',async()=>{
+ const {db,store}=await embedded();await migratePostgres(store);const org=randomUUID(),aId=randomUUID(),bId=randomUUID(),password=await hashPassword(FIXTURE_PASSWORD);
+ await store.transaction(async()=>{await store.run('INSERT INTO organizations VALUES (?,?)',org,'Synthetic AI PG');for(const [id,email] of [[aId,'a'],[bId,'b']])await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,org,email+'@fixture.invalid',email,'admin',password);});await db.exec('SET ROLE sim_app');
+ let calls=0;const config={enabled:true,budgetUSD:.1,inputRate:.125,outputRate:.5,generate:()=>{calls++;throw new DOMException('Synthetic timeout','TimeoutError');}};let app=await createLocalServer({store,chat:config,loginLimit:20}),origin;
+ const listen=async()=>{await new Promise(r=>app.server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+app.server.address().port;};await listen();
+ const client=()=>{let cookie='';return {async request(path,body){const r=await fetch(origin+'/api/local/'+path,{method:body===undefined?'GET':'POST',headers:{Origin:origin,'Content-Type':'application/json','Idempotency-Key':randomUUID(),Cookie:cookie},body:body===undefined?undefined:JSON.stringify(body)});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};}};};
+ try{const a=client(),b=client();for(const [c,email] of [[a,'a'],[b,'b']])assert.equal((await c.request('login',{email:email+'@fixture.invalid',password:FIXTURE_PASSWORD})).status,200);
+ const open=async c=>(await c.request('ai/chat/sessions',{studentId:null,providerConsent:true})).data.sessionId;const send=(c,id)=>c.request('ai/chat/message',{sessionId:id,message:'Synthetic request'});let aid=await open(a),bid=await open(b);
+ assert.equal((await send(a,aid)).status,502);let ledger=await store.all("SELECT result FROM operations WHERE operation_key LIKE 'ai-budget-%'");assert.equal(ledger.length,1);const reserved=JSON.parse(ledger[0].result);assert.ok(reserved.reservedUSD>0);assert.equal(reserved.maxOutputTokens,700);assert.ok(reserved.inputUpperTokens>2048);
+ config.budgetUSD=reserved.reservedUSD*2+1e-10;const simultaneous=await Promise.all([send(a,aid),send(b,bid)]);assert.deepEqual(simultaneous.map(v=>v.status).sort(),[502,503]);assert.equal(calls,2);assert.equal((await store.all("SELECT * FROM operations WHERE operation_key LIKE 'ai-budget-%'")).length,2);
+ app.server.closeAllConnections();await new Promise(r=>app.server.close(r));app=await createLocalServer({store,chat:config,loginLimit:20});await listen();aid=await open(a);assert.equal((await send(a,aid)).status,503);assert.equal(calls,2);
+ config.budgetUSD=.1;await store.run("UPDATE operations SET result=? WHERE operation_key LIKE 'ai-budget-%'",JSON.stringify({reservedUSD:-1,createdAt:Date.now()}));assert.equal((await send(a,aid)).status,503);assert.equal(calls,2);await assert.rejects(()=>store.query('CREATE TABLE forbidden_chat(id INTEGER)'));
+ }finally{await app.close();}
+});

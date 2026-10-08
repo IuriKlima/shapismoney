@@ -1,3 +1,4 @@
+import {chatRuntimeConfiguration} from './ai-chat.mjs';
 import http from 'node:http';
 import {resolveAIConfiguration} from './ai-config.mjs';
 import {readFileSync} from 'node:fs';
@@ -24,7 +25,7 @@ export async function createLocalServer({filename,store:provided,security=localS
     const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'};
     try{let body=readFileSync(path.join(root,name));if(security.production&&name==='persistent.html')body=Buffer.from(body.toString().replace('Fatia local persistente · somente dados fictícios · convites com entrega manual; sem pagamentos ou uploads. Este fluxo usa sessões e banco no servidor, separado da demonstração.','Acompanhamento com acesso individual. Propostas de treino exigem aprovação profissional; pagamentos e uploads ainda indisponíveis.'));res.writeHead(200,{'Content-Type':types[path.extname(name)]});res.end(body);}catch{res.writeHead(500);res.end('Recurso indisponível.');}
   });
-  return {server,store,close:async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await serviceStore.close();}};
+  return {server,store,close:async()=>{api.close?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await serviceStore.close();}};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   let app;
@@ -33,7 +34,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     const port=Number(process.env.SIM_BACKEND_PORT||'5190');if(!Number.isInteger(port)||port<1||port>65535)throw Error('Invalid application port.');
     const ai=resolveAIConfiguration(process.env);
     let store;if(production){store=postgresStore(poolFromEnvironment());try{await verifyRuntimeRole(store);}catch(error){await store.close();throw error;}}
-    app=await createLocalServer({filename:path.resolve('.qa/local-backend/app.sqlite'),store,security,ai});
+    app=await createLocalServer({filename:path.resolve('.qa/local-backend/app.sqlite'),store,security,ai,chat:chatRuntimeConfiguration(process.env,ai)});
     app.server.listen(port,production?'0.0.0.0':'127.0.0.1',()=>console.log('SIM backend started | '+(production?'PostgreSQL / trusted HTTPS proxy':'local loopback / no accounts provisioned')));
     for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>app.close().then(()=>process.exit(0)));
   }catch{console.error('SIM startup failed: validate PostgreSQL roles/migrations, HTTPS origin, proxy and required environment. No fallback was started.');process.exitCode=1;}
