@@ -1,3 +1,4 @@
+import {executionFlow} from './execution.mjs';
 import {invitationFlow} from './invitations.mjs';
 import {assertRequest,localSecurity,cookieHeader} from './security.mjs';
 import {createDevAIHandler} from '../prototype/dev-ai.mjs';
@@ -53,6 +54,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>16384)deny(413,'Limite de entrada: 16 KB.');chunks.push(chunk);}
     try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{deny(400,'JSON inválido.');}
   }
+  const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student});
   return async function handle(req,res){
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
@@ -81,6 +83,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/logout'&&req.method==='POST'){
         const body=await read(req);exact(body,[]);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
+      const executionResult=await execution.handle(actor,req,route);if(executionResult)return send(executionResult.status,executionResult.data);
       if(route==='/api/local/invitations'&&req.method==='POST'){const result=await invites.create(actor,req);return send(result.status,result.data);}
       if(route==='/api/local/professionals'&&req.method==='GET'){if(actor.role!=='admin')deny(403,'Equipe restrita ao administrador.');return send(200,{professionals:await store.all("SELECT id,name,role FROM users WHERE org_id=? AND active=1 AND role IN ('coach','nutrition') ORDER BY name",actor.org_id)});}
       if(route==='/api/local/students'&&req.method==='GET')return send(200,{students:(await list(actor)).map(row=>studentDTO(row,actor))});
@@ -117,9 +120,9 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         if(studentMatch[2]==='/onboarding'&&req.method==='PUT'){trainingManager(actor,row);const result=await saveOnboarding(actor,req,row,await read(req),'onboarding.recorded');return send(result.status,result.data);}
         if(studentMatch[2]==='/plans'&&req.method==='GET'){const plans=await store.all('SELECT * FROM plans WHERE student_id=?'+(actor.role==='student'?" AND status='published'":'')+' ORDER BY id DESC',row.id);return send(200,{plans:plans.map(publicPlan)});}
         if(studentMatch[2]==='/plans'&&req.method==='POST'){
-          trainingManager(actor,row);const body=await read(req);exact(body,['title','exercises']);const title=text(body.title,2,100);if(!Array.isArray(body.exercises)||body.exercises.length<1||body.exercises.length>12)deny(400,'Use 1–12 exercícios.');
+          trainingManager(actor,row);const body=await read(req);exact(body,Object.hasOwn(body,'daysPerWeek')?['title','exercises','daysPerWeek']:['title','exercises']);const daysPerWeek=body.daysPerWeek??3;if(!Number.isInteger(daysPerWeek)||daysPerWeek<1||daysPerWeek>7)deny(400,'Frequência semanal inválida.');const title=text(body.title,2,100);if(!Array.isArray(body.exercises)||body.exercises.length<1||body.exercises.length>12)deny(400,'Use 1–12 exercícios.');
           const exercises=body.exercises.map(e=>{exact(e,['name','sets','reps']);if(!Number.isInteger(e.sets)||e.sets<1||e.sets>10||!Number.isInteger(e.reps)||e.reps<1||e.reps>50)deny(400,'Séries ou repetições inválidas.');return {name:text(e.name,2,100),sets:e.sets,reps:e.reps};});
-          const result=await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};});return send(result.status,result.data);
+          const result=await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};});return send(result.status,result.data);
         }
       }
       const planMatch=/^\/api\/local\/plans\/([a-f0-9-]{36})\/(submit|approve|publish)$/.exec(route);

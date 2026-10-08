@@ -1,0 +1,7 @@
+CREATE TABLE workouts(id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES organizations(id), student_id TEXT NOT NULL REFERENCES students(id), plan_id TEXT NOT NULL REFERENCES plans(id), day TEXT NOT NULL CHECK(length(day)=10), prescription TEXT NOT NULL, weekly_target INTEGER NOT NULL CHECK(weekly_target BETWEEN 1 AND 7), completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1)), revision INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, UNIQUE(student_id,day));
+CREATE TABLE workout_sets(workout_id TEXT NOT NULL REFERENCES workouts(id), exercise_index INTEGER NOT NULL CHECK(exercise_index BETWEEN 0 AND 11), set_index INTEGER NOT NULL CHECK(set_index BETWEEN 0 AND 9), reps INTEGER NOT NULL CHECK(reps BETWEEN 0 AND 50), load REAL NOT NULL CHECK(load BETWEEN 0 AND 500), completed INTEGER NOT NULL CHECK(completed IN (0,1)), PRIMARY KEY(workout_id,exercise_index,set_index));
+CREATE TABLE workout_edits(id TEXT PRIMARY KEY, workout_id TEXT NOT NULL REFERENCES workouts(id), actor_id TEXT NOT NULL REFERENCES users(id), before_value TEXT NOT NULL, after_value TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE ranking_preferences(student_id TEXT PRIMARY KEY REFERENCES students(id), org_id TEXT NOT NULL REFERENCES organizations(id), enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), alias TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1);
+CREATE INDEX workouts_org_day ON workouts(org_id,day);
+CREATE INDEX workouts_student_day ON workouts(student_id,day);
+CREATE INDEX workout_edits_workout ON workout_edits(workout_id,created_at);

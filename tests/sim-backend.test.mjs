@@ -34,7 +34,7 @@ test('cadastro validado, dedup/idempotência/auditoria e persistência após rei
   const created=await c.request('students',data,'POST',{'Idempotency-Key':key});assert.equal(created.status,201);assert.equal(created.data.accountProvisioned,false);const id=created.data.student.id;
   assert.deepEqual((await c.request('students',data,'POST',{'Idempotency-Key':key})).data,created.data);assert.equal((await c.request('students',{...data,name:'Outro pedido'},'POST',{'Idempotency-Key':key})).status,409);assert.equal((await c.request('students',{...data,email:'new@fixture.invalid'})).status,409);
   const audit=await c.request('audit');assert.equal(audit.data.audit.filter(a=>a.event==='student.created'&&a.student_id===id).length,1);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM users').count,7);
-  await f.restart();assert.equal((await c.request('session')).status,200);assert.equal((await c.request('students/'+id)).data.student.name,data.name);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM schema_migrations').count,2);
+  await f.restart();assert.equal((await c.request('session')).status,200);assert.equal((await c.request('students/'+id)).data.student.name,data.name);assert.equal(f.store.get('SELECT COUNT(*) AS count FROM schema_migrations').count,3);
 }));
 test('onboarding salva no servidor; revisão antes de publicar e aluno só vê aprovado/publicado',async()=>withFixture(async f=>{
   const c=f.client(),s=f.client(),n=f.client(),other=f.client();for(const [client,role] of [[c,'coach'],[s,'student'],[n,'nutrition'],[other,'otherStudent']])await client.login(role);
@@ -163,5 +163,8 @@ test('synthetic acceptance: registration, separate invitations, assignment, acti
   let plan=(await professional.request('students/'+id+'/plans',{title:'Acceptance plan',exercises:[{name:'Synthetic exercise',sets:3,reps:10}]})).data.plan;
   assert.equal((await recipient.request('students/'+id+'/plans')).data.plans.length,0);assert.equal((await professional.request('plans/'+plan.id+'/publish',{revision:plan.revision})).status,409);
   for(const action of ['submit','approve','publish']){const result=await professional.request('plans/'+plan.id+'/'+action,{revision:plan.revision});assert.equal(result.status,200);plan=result.data.plan;}
-  assert.equal((await recipient.request('students/'+id+'/plans')).data.plans[0].id,plan.id);await f.restart();assert.equal((await recipient.request('students/'+id+'/plans')).data.plans[0].status,'published');
+  assert.equal((await recipient.request('students/'+id+'/plans')).data.plans[0].id,plan.id);
+  let workout=(await recipient.request('workouts',{planId:plan.id})).data.workout;for(let i=0;i<3;i++)workout=(await recipient.request('workouts/'+workout.id+'/sets',{exerciseIndex:0,setIndex:i,reps:10,load:0,completed:true,revision:workout.revision},'PUT')).data.workout;assert.equal(workout.completed,true);
+  assert.equal((await recipient.request('ranking/preferences',{enabled:true,alias:'Acceptance participant',revision:0},'PUT')).status,200);assert.equal((await admin.request('ranking')).data.entries[0].consistency,33);
+  await f.restart();assert.equal((await recipient.request('students/'+id+'/plans')).data.plans[0].status,'published');assert.equal((await recipient.request('workouts/current')).data.workout.completed,true);assert.equal((await recipient.request('ranking/preferences',{enabled:false,alias:'',revision:1},'PUT')).status,200);assert.equal((await admin.request('ranking')).data.entries.length,0);
 },{loginLimit:30}));
