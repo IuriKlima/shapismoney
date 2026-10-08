@@ -44,3 +44,9 @@ Staging publicado conserva SIM_AI_ENABLED=false. Flags de chat ausentes equivale
 São fontes de implementação, não acervo conectado ao modelo. Este incremento não implementa avaliação por fotos, anamnese completa, ciclo, reavaliação, progressão ou memória longitudinal. Não copia documentos confidenciais para Git/OpenAI. Conectar corpus e prescrições completas exige etapa posterior própria.
 
 Referências técnicas: https://developers.openai.com/api/docs/guides/structured-outputs , https://developers.openai.com/api/docs/models/gpt-6-luna , https://developers.openai.com/api/docs/pricing , https://developers.openai.com/api/docs/guides/your-data .
+
+## QA visual e verificação de publicação
+
+QA do chat com dados fictícios e provider mock em 390/320px: diálogo de proposta, dados escapados, cancelamento via Enter/Escape e retorno do foco ao botão de revisão. Overflow interno observado em JSON foi corrigido com pre-wrap/overflow-wrap. Sem criação de conta ou dados reais. A matriz para conclusão do produto está em [acceptance-matrix.md](acceptance-matrix.md).
+
+Runtime do commit 78e29169 conferido por hashes Git dos módulos IA/service/server/UI, flags AI/chat/review falsas e UID1000; /healthz interno/público200, /local200 TLS válido, sessão/chat sem autenticação401 e Origin externo403. Binds DB/chave preservados; arquivo da chave regular root:1000 0440, legível e não gravável por UID1000; mount kernel rw (proteção Unix). Correção móvel e sua identidade final de deploy serão conferidas separadamente.

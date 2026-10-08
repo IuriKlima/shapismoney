@@ -839,3 +839,6 @@
   .persistent-page .premium-pagehead h1 { scroll-margin-top:128px; }
   .persistent-page :is(#training-section,#execution-section,#ranking-section) { scroll-margin-top:100px; }
 }
+/* Chat proposals remain readable at narrow widths, including long email addresses. */
+#chat-section,.premium-confirm{overflow-wrap:anywhere;}
+#chat-section pre,.premium-confirm pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font-size:.82rem;line-height:1.6;}
