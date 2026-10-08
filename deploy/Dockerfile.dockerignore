@@ -1,8 +1,6 @@
 **
 !backend/
 !backend/**
-!prototype/
-!prototype/dev-ai.mjs
 !public/
 !public/sim/
 !public/sim/persistent.html

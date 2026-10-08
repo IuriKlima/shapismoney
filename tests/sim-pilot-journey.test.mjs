@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {rmSync} from 'node:fs';
+import {isolatedFixture,FIXTURE_PASSWORD} from './backend-fixtures.mjs';
+import {createLocalServer} from '../backend/server.mjs';
+import {INTAKE_VERSION} from '../public/sim/intake-fields.js';
+import {fullIntakeAnswers} from './intake-test-fixtures.mjs';
+
+test('integrated synthetic pilot: invite, original intake, SLA, reviewed training/nutrition, isolation, execution and mock-only budget',async()=>{
+ const f=await isolatedFixture();let clock=Date.now(),calls=0;const inputs=[];
+ const app=await createLocalServer({store:f.store,loginLimit:40,now:()=>clock,chat:{enabled:true,budgetMode:'monthly-per-student',globalMonthlyUSD:.1,adminMonthlyUSD:.1,budgetUSD:.1,inputRate:.125,outputRate:.5,model:'gpt-6-luna',authorizedUserIds:[f.ids.admin],expiresAt:clock+86400000,priceValidUntil:clock+30*86400000,generate:async input=>{calls++;inputs.push(input);return {reply:'Synthetic administrative reply',inferences:[],action:null};}}});
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+app.server.address().port;
+ const client=()=>{let cookie='';return {async req(route,body,method='POST'){const r=await fetch(origin+'/api/local/'+route,{method:body===undefined?'GET':method,headers:{Origin:origin,'Content-Type':'application/json','Idempotency-Key':randomUUID(),Cookie:cookie},body:body===undefined?undefined:JSON.stringify(body)});if(r.headers.has('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};},login(role){return this.req('login',{email:role.toLowerCase()+'@fixture.invalid',password:FIXTURE_PASSWORD});}};};
+ const ok=async(p,status=200)=>{const r=await p;assert.equal(r.status,status,JSON.stringify(r.data));return r.data;};
+ try{
+ const a=client(),c=client(),n=client(),s=client(),other=client();for(const [x,role] of [[a,'admin'],[c,'coach'],[n,'nutrition'],[other,'otherStudent']])await ok(x.login(role));
+ const row=(await ok(a.req('students',{name:'Synthetic integrated student',email:'integrated@fixture.invalid',internalNote:'PRIVATE_SYNTHETIC_NOTE'}),201)).student;const id=row.id,route='students/'+id;
+ await ok(a.req(route+'/assignments',{coachId:f.ids.coach,nutritionId:f.ids.nutrition,revision:1},'PUT'));
+ const invitation=await ok(a.req('invitations',{kind:'student',studentId:id,email:row.email,name:row.name,professionalRole:null,verifiedDelivery:true}),201);
+ const activation={token:invitation.token,email:row.email,password:FIXTURE_PASSWORD};await ok(s.req('activate',activation),201);await ok(s.req('activate',activation),400);await ok(s.req('login',{email:row.email,password:FIXTURE_PASSWORD}));
+ assert.ok(!JSON.stringify((await ok(s.req(route))).student).includes('PRIVATE_SYNTHETIC_NOTE'));
+ const own=(await ok(s.req(route))).student;await ok(s.req('onboarding',{goal:'Condicionamento',days:3,experience:'Iniciante',context:'Synthetic context',revision:own.revision},'PUT'));assert.equal(f.store.get('SELECT COUNT(*) n FROM service_cases').n,0);
+ const intake=route+'/anamnesis',confirm=revision=>({version:INTAKE_VERSION,revision,confirmed:true});
+ await ok(s.req(intake,{version:INTAKE_VERSION,revision:0,answers:{main_goal:'Synthetic draft'},consents:{training:true,nutrition:true}},'PUT'));await ok(s.req(intake+'/complete',confirm(1)),400);
+ const answers={...fullIntakeAnswers(),weight_kg:80,letter:'Synthetic optional letter',personal_context:'PRIVATE_SYNTHETIC_NARRATIVE'};assert.equal(Object.keys(answers).length,28);
+ await ok(s.req(intake,{version:INTAKE_VERSION,revision:1,answers,consents:{training:true,nutrition:true}},'PUT'));await ok(s.req(intake+'/complete',confirm(2)),201);
+ const initial=f.store.get('SELECT * FROM service_cases WHERE student_id=?',id);assert.equal(initial.target_at-initial.started_at,48*3600000);assert.equal(initial.promised_at-initial.started_at,72*3600000);assert.equal((await ok(s.req(intake+'/complete',confirm(2)))).startedNow,false);
+ assert.equal((await ok(a.req(intake))).anamnesis.answers,undefined);assert.ok(!JSON.stringify(await ok(a.req('crm'))).includes('PRIVATE_SYNTHETIC_NARRATIVE'));await ok(a.req(intake+'/review',confirm(2)),403);await ok(c.req(intake+'/review',confirm(2)));
+ await ok(a.req('nutrition/credentials',{userId:f.ids.nutrition,registration:'SYNTHETIC TEST ONLY',verified:true,checkedRegistration:true,revision:0},'PUT'));
+ assert.deepEqual(Object.keys((await ok(n.req(intake))).anamnesis.answers).sort(),['current_diet','fractures','injuries','restrictions']);
+ const delivery={revision:initial.revision,status:'delivered',responsibleId:f.ids.coach,note:'Synthetic reviewed delivery',confirmed:true,reviewedOnboarding:true};await ok(a.req(route+'/service',delivery,'PUT'),409);clock+=1000;
+ let plan=(await ok(c.req(route+'/plans',{title:'Synthetic training',daysPerWeek:3,exercises:[{name:'Synthetic exercise',sets:1,reps:10}]}),201)).plan;assert.equal((await ok(s.req(route+'/plans'))).plans.length,0);await ok(c.req('plans/'+plan.id+'/publish',{revision:plan.revision}),409);
+ for(const action of ['submit','approve','publish'])plan=(await ok(c.req('plans/'+plan.id+'/'+action,{revision:plan.revision}))).plan;
+ assert.equal((await ok(s.req(route+'/plans'))).plans[0].id,plan.id);await ok(other.req(route+'/plans'),404);
+ const foodBody={name:'Synthetic composition',preparation:'cooked',per100g:{energyKcal:120,proteinG:10,carbsG:15,fatG:2},allergens:[],mayContain:[],provenance:{source:'Synthetic fixture',reference:'Not real food',version:'1'}};
+ let food=(await ok(n.req('nutrition/foods',foodBody),201)).food;food=(await ok(n.req('nutrition/foods/'+food.id+'/approve',{revision:food.revision,sourceVerified:true}))).food;
+ let diet=(await ok(n.req(route+'/nutrition',{title:'Synthetic nutrition',allergies:[],allergiesChecked:true,meals:[{name:'Synthetic meal',items:[{foodId:food.id,grams:100,alternatives:[]}]}]}),201)).plan;
+ await ok(s.req('nutrition/plans/'+diet.id),404);await ok(n.req('nutrition/plans/'+diet.id+'/publish',{revision:diet.revision}),409);
+ for(const action of ['submit','approve','publish'])diet=(await ok(n.req('nutrition/plans/'+diet.id+'/'+action,{revision:diet.revision,...(action==='approve'?{reviewed:true}:{})}))).plan;
+ await ok(s.req('nutrition/plans/'+diet.id));await ok(other.req('nutrition/plans/'+diet.id),404);await ok(c.req('nutrition/plans/'+diet.id),403);
+ await ok(a.req(route+'/service',delivery,'PUT'));assert.equal(f.store.get('SELECT status FROM service_cases WHERE student_id=?',id).status,'delivered');assert.equal(f.store.get('SELECT target_at FROM service_cases WHERE student_id=?',id).target_at,initial.target_at);
+ let workout=(await ok(s.req('workouts',{planId:plan.id}),201)).workout;workout=(await ok(s.req('workouts/'+workout.id+'/sets',{exerciseIndex:0,setIndex:0,reps:10,load:0,completed:true,revision:workout.revision},'PUT'))).workout;assert.equal(workout.completed,true);
+ await ok(s.req('ranking/preferences',{enabled:true,alias:'Synthetic pilot',revision:0},'PUT'));assert.equal((await ok(a.req('ranking'))).entries[0].consistency,33);await ok(s.req('ranking/preferences',{enabled:false,alias:'',revision:1},'PUT'));assert.equal((await ok(a.req('ranking'))).entries.length,0);
+ assert.equal((await ok(a.req('ai/chat/capabilities'))).available,true);assert.equal((await ok(s.req('ai/chat/capabilities'))).available,false);await ok(c.req('ai',{scenario:'method',syntheticConsent:true}),503);
+ const session=(await ok(a.req('ai/chat/sessions',{studentId:null,providerConsent:true}),201)).sessionId;await ok(a.req('ai/chat/message',{sessionId:session,message:'Synthetic administrative question only'}));assert.equal(calls,1);assert.equal(inputs[0].untrustedContext.publishedPlans.length,0);assert.ok(!JSON.stringify(inputs).includes('PRIVATE_SYNTHETIC'));
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM ai_monthly_reservations').n,1);const budget=await ok(a.req('ai/budget'));assert.ok(budget.administrative.reservedUSD>0&&budget.administrative.reservedUSD<.003);assert.equal(budget.openAIBalanceKnown,false);
+ clock+=21*60000;await ok(a.req('ai/chat/message',{sessionId:session,message:'Expired synthetic session'}),404);assert.equal(calls,1);clock+=86400000;await ok(a.login('admin'));assert.equal((await ok(a.req('ai/chat/capabilities'))).available,false);await ok(a.req('ai/chat/sessions',{studentId:null,providerConsent:true}),503);assert.equal(calls,1);assert.equal(f.store.get("SELECT COUNT(*) n FROM audit WHERE event='ai.provider-consent'").n,1);
+ }finally{await app.close();rmSync(f.directory,{recursive:true,force:true});}
+});

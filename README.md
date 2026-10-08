@@ -70,7 +70,7 @@ Referências de implementação: [Node 24 SQLite](https://nodejs.org/docs/latest
 
 ### IA no fluxo autenticado
 
-O backend persistente oferece `/api/local/ai`, exigindo sessão válida e papel de personal/nutrição. O papel vem do banco, nunca do payload. O cliente escolhe somente exemplos sintéticos definidos no servidor; nenhum dado do CRM é enviado e nenhum plano/aluno é alterado. Para desenvolvimento, `dev:backend` lê `.env.local` apenas no processo servidor; `SIM_AI_ENABLED=false` é o padrão. Ao habilitar explicitamente com a chave dev já configurada, a UI usa Responses API real; erros permanecem erros. Testes automatizados usam provider mock, sem novas chamadas pagas. Produção não recebe automaticamente a chave dev; acesso e segredos de produção exigem handoff separado aprovado.
+No backend persistente, a rota legada `/api/local/ai` permanece desativada (HTTP 503), inclusive com `SIM_AI_ENABLED=true`; suas capabilities nunca anunciam disponibilidade. O runtime e a imagem de produção não incluem o handler de demonstração. Somente `/api/local/ai/chat/*` pode chamar o provedor, sujeito a papel, allowlist, prazo, consentimento e reserva durável de orçamento. `SIM_AI_ENABLED=false` continua sendo o padrão. O protótipo local separado `dev:ai` usa apenas exemplos fictícios e não faz parte da imagem persistente. Testes usam providers mock, sem chamadas pagas. Produção não recebe automaticamente a chave dev; acesso e segredos de produção exigem handoff separado aprovado.
 
 Homologação HTTPS restrita: usar `SIM_DEPLOYMENT_STAGE=staging`, IPs exatos em `SIM_STAGING_CLIENT_IPS` e `SIM_PRODUCTION_REVIEWED=false`; mantém os requisitos de DB/proxy/cookies de produção. Ver [handoff](deploy/README.md) antes de autorizar produção ou provisionamento.
 

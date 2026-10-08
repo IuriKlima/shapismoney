@@ -24,7 +24,7 @@ test('PostgreSQL embarcado: migrations repetíveis, checksum, papel limitado e Q
     await store.run('UPDATE schema_migrations SET checksum=?','invalid-checksum');await assert.rejects(()=>migratePostgres(store),/checksum mismatch/);
   }finally{await store.close();}
 });
-test('SQL PostgreSQL embarcado: login, isolamento, idempotência concorrente, revisão e IA autenticada mock',async()=>{
+test('SQL PostgreSQL embarcado: login, isolamento, idempotência concorrente, revisão e rota legada de IA desativada',async()=>{
   const {store}=await embedded();await migratePostgres(store);const org=randomUUID(),coach=randomUUID(),studentUser=randomUUID(),otherUser=randomUUID(),student=randomUUID(),otherStudent=randomUUID();const password=await hashPassword(FIXTURE_PASSWORD);
   await store.transaction(async()=>{await store.run('INSERT INTO organizations VALUES (?,?)',org,'Fictício PG');for(const [id,email,role] of [[coach,'coach@fixture.invalid','coach'],[studentUser,'student@fixture.invalid','student'],[otherUser,'other@fixture.invalid','student']])await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,org,email,'Fictício',role,password);for(const [id,user,email] of [[student,studentUser,'student@fixture.invalid'],[otherStudent,otherUser,'other@fixture.invalid']])await store.run('INSERT INTO students(id,org_id,user_id,coach_id,email,name,internal_note) VALUES (?,?,?,?,?,?,?)',id,org,user,coach,email,'Aluno fictício','NOTA INTERNA');});
   let calls=0;const app=await createLocalServer({store,loginLimit:20,ai:{apiKey:'test-only-provider-key',fetchImpl:async(_url,options)=>{calls++;const input=JSON.parse(options.body);assert.ok(!JSON.stringify(input).includes('NOTA INTERNA'));assert.ok(!JSON.stringify(input).includes('@fixture.invalid'));return new Response(JSON.stringify({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'Resposta do provider mock; revisão profissional.'}]}]}));}}});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+app.server.address().port;
@@ -35,7 +35,7 @@ test('SQL PostgreSQL embarcado: login, isolamento, idempotência concorrente, re
     const input={name:'Fictício PG novo',email:'new@fixture.invalid',internalNote:'Interna'},key=randomUUID();const repeated=await Promise.all([c.request('students',input,key),c.request('students',input,key)]);assert.equal(repeated[0].status,201);assert.equal(repeated[1].status,201);assert.deepEqual(repeated[0].data,repeated[1].data);assert.equal((await store.get("SELECT COUNT(*)::integer AS n FROM students WHERE email='new@fixture.invalid'")).n,1);
     let plan=(await c.request('students/'+student+'/plans',{title:'PG fictício',exercises:[{name:'Exemplo',sets:3,reps:10}]})).data.plan;assert.equal((await s.request('students/'+student+'/plans')).data.plans.length,0);assert.equal((await c.request('plans/'+plan.id+'/publish',{revision:plan.revision})).status,409);
     for(const action of ['submit','approve','publish'])plan=(await c.request('plans/'+plan.id+'/'+action,{revision:plan.revision})).data.plan;assert.equal((await s.request('students/'+student+'/plans')).data.plans[0].status,'published');
-    const question={scenario:'method',syntheticConsent:true};assert.equal((await anonymous.request('ai',question)).status,401);assert.equal((await s.request('ai',question)).status,403);assert.equal((await c.request('ai',{...question,role:'admin'})).status,400);const reply=await c.request('ai',question);assert.equal(reply.status,200);assert.equal(reply.data.writesPerformed,false);assert.match(reply.data.reply,/provider mock/);assert.equal(calls,1);assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM plans')).n,1);
+    const question={scenario:'method',syntheticConsent:true};assert.equal((await anonymous.request('ai',question)).status,401);assert.equal((await s.request('ai',question)).status,503);assert.equal((await c.request('ai',{...question,role:'admin'})).status,503);const reply=await c.request('ai',question);assert.equal(reply.status,503);assert.equal(reply.data.reply,undefined);assert.equal(calls,0);assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM plans')).n,1);
   }finally{await app.close();}
 });
 test('contrato do pool usa mesmo cliente na transação e libera após rollback',async()=>{
@@ -84,7 +84,7 @@ test('PostgreSQL limitado: admin cadastra/onboarda/publica treino, sem acesso a 
       const result=await owner.request('plans/'+plan.id+'/'+action,{revision:plan.revision});assert.equal(result.status,200);plan=result.data.plan;
     }
     assert.equal(plan.status,'published');
-    assert.equal((await owner.request('ai',{scenario:'method',syntheticConsent:true})).status,403);
+    assert.equal((await owner.request('ai',{scenario:'method',syntheticConsent:true})).status,503);
     assert.equal((await store.get('SELECT COUNT(*)::integer AS n FROM users')).n,2);
     await assert.rejects(()=>store.query('CREATE TABLE forbidden_admin_test(id INTEGER)'));
     await assert.rejects(()=>store.run('DELETE FROM schema_migrations'));

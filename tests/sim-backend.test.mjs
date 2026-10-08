@@ -91,7 +91,7 @@ test('admin gere cadastro, onboarding e treino somente na própria organização
   }
   assert.equal((await student.request('students/'+f.ids.studentRecord+'/plans')).data.plans[0].status,'published');
   const wrongRevision=await admin.request('plans/'+plan.id+'/publish',{revision:1});assert.equal(wrongRevision.status,409);
-  assert.equal((await admin.request('ai',{scenario:'method',syntheticConsent:true})).status,403);
+  assert.equal((await admin.request('ai',{scenario:'method',syntheticConsent:true})).status,503);
   assert.equal((await admin.request('nutrition',{})).status,404);
   const audit=(await admin.request('audit')).data.audit;assert.ok(audit.some(e=>e.actor_id===f.ids.admin&&e.event==='onboarding.recorded'));
   assert.ok(audit.some(e=>e.actor_id===f.ids.admin&&e.event==='plan.publish'));
@@ -177,11 +177,9 @@ test('capabilities autenticadas refletem a configuração sem ampliar papéis ou
       for(const role of ['admin','student','coach','nutrition']){
         const client=f.client();await client.login(role);
         const response=await client.request('ai/capabilities');assert.equal(response.status,200);
-        const permitted=['coach','nutrition'].includes(role);
-        assert.deepEqual(response.data,{available:enabled&&permitted,reason:!permitted?'role-restricted':enabled?'available':'disabled',mode:'synthetic-development',writesPerformed:false});
+        assert.deepEqual(response.data,{available:false,reason:'legacy-disabled',mode:'synthetic-development',writesPerformed:false});
         assert.ok(!JSON.stringify(response.data).includes('fixture-ai-credential'));
-        if(!permitted)assert.equal((await client.request('ai',{scenario:'method',syntheticConsent:true})).status,403);
-        else if(!enabled)assert.equal((await client.request('ai',{scenario:'method',syntheticConsent:true})).status,503);
+        assert.equal((await client.request('ai',{scenario:'method',syntheticConsent:true})).status,503);
       }
       assert.equal(calls,0);
     },{loginLimit:30,ai:{apiKey:enabled?'fixture-ai-credential':'',fetchImpl:async()=>{calls++;throw Error('Provider must not run during capability checks');}}});

@@ -4,10 +4,8 @@ import {monthlyBudget} from './ai-monthly-budget.mjs';
 import {nutritionFlow} from './nutrition.mjs';
 import {aiChatFlow} from './ai-chat.mjs';
 import {executionFlow} from './execution.mjs';
-import {aiCapabilities} from './ai-config.mjs';
 import {invitationFlow} from './invitations.mjs';
 import {assertRequest,localSecurity,cookieHeader} from './security.mjs';
-import {createDevAIHandler} from '../prototype/dev-ai.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {hashPassword,verifyPassword,newToken,tokenHash} from './auth.mjs';
 class Failure extends Error{constructor(status,message){super(message);this.status=status;}}
@@ -17,9 +15,8 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:JSON.parse(p.content),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),ai={},chat={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={}}={}){
   const dummy=await hashPassword(newToken());
-  const askAI=createDevAIHandler({...ai,guard:req=>assertRequest(req,security),cors:false});
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
   async function session(req){
     const match=new RegExp('(?:^|;\\s*)'+security.cookieName+'=([A-Za-z0-9_-]{43})(?:;|$)').exec(req.headers.cookie||'');
@@ -105,8 +102,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       const serviceResult=await sla.handle(actor,req,route);if(serviceResult)return send(serviceResult.status,serviceResult.data);
       const budgetResult=await budget.handle(actor,req,route);if(budgetResult)return send(budgetResult.status,budgetResult.data);
       const chatResult=await chatFlow.handle(actor,auth,req,route);if(chatResult)return send(chatResult.status,chatResult.data);
-      if(route==='/api/local/ai/capabilities'&&req.method==='GET')return send(200,aiCapabilities(actor.role,ai));
-      if(route==='/api/local/ai'&&req.method==='POST'){if(!['coach','nutrition'].includes(actor.role))deny(403,'IA restrita a profissionais autenticados.');return await askAI(req,res);}
+      if(route==='/api/local/ai/capabilities'&&req.method==='GET')return send(200,{available:false,reason:'legacy-disabled',mode:'synthetic-development',writesPerformed:false});
+      if(route==='/api/local/ai'&&req.method==='POST'){deny(503,'Rota antiga de IA desativada. Use o chat autorizado.');}
       if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:publicUser(actor)});
       if(route==='/api/local/logout'&&req.method==='POST'){
         const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
