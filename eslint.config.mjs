@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    ".qa/**", ".sites-runtime/**", ".agents/**", ".codex/**", ".wrangler/**", "dist/**", "outputs/**", "work/**",
   ]),
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],

@@ -1,38 +1,73 @@
 # Shape IS Money
 
-Demonstração privada funcional, em português, com a marca fornecida.
+Interface demonstrativa em português, com a marca vetorial fornecida por Bruno. A fonte canônica da interface é `public/sim/`, montada por React em `components/SIMWorkspace.tsx`. As rotas `/`, `/app`, `/comecar` e `/crm` usam a mesma implementação.
 
-## Funcionalidades
-- Landing page com plano ilustrativo de R$ 149, FAQ e acesso à plataforma.
-- Compra demonstrativa sem cobrança → anamnese → perfil.
-- IA simulada: exemplos de treino, alimentação e performance. Nenhuma chamada a modelo ou prescrição individual.
-- Planos liberados após 48 horas; aviso de até 3 dias úteis. O prazo demonstrativo considera segunda a sexta, sem calendário de feriados.
-- Aluno: dashboard, treinos, check-in diário, histórico de peso e cintura, ranking mensal (100 pontos por dia de treino), perfil e comunidade.
-- Personal: alunos, anamnese, editor de treinos, aprovação, pausa de aluno e moderação de publicações.
-- Fotos JPG/PNG/WebP até 5 MB em R2; dados em D1 com controle de revisão para evitar perda de atualizações.
-- Interface mobile com navegação inferior.
+## Rodar e validar
 
-## Demonstração
-A chave Aluno / Personal no cabeçalho alterna as duas experiências. Os perfis são fictícios. Cada identidade autenticada possui um ambiente demonstrativo isolado: não há comunidade compartilhada entre contas reais nesta versão. No editor do personal, “Simular entrega da IA agora” permite testar os três planos sem esperar dois dias. Os botões de gestão são controles de simulação do proprietário; ainda não há autorização de papéis para operação com alunos reais.
+Node 22.13 ou superior, com npm no PATH:
 
-## Rodar localmente
-Node 22.13+.
+```sh
+npm ci
+npm run dev
+```
 
-1. npm install
-2. npm run db:generate (somente se alterar schema)
-3. npm run build
-4. node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_peaceful_random.sql (uma vez)
-5. npm run dev
-6. Abrir a URL local impressa e entrar pelo acesso à plataforma.
+Abra a URL loopback impressa, normalmente http://127.0.0.1:5173. Em outro terminal, execute `npm run demo:media` para a biblioteca opcional e o preview independente em http://127.0.0.1:5174. Sem biblioteca, a interface informa que o vídeo está indisponível. Não há download nem upload dos vídeos.
 
-Os auxiliares do starter simulam autenticação apenas em loopback durante desenvolvimento. Em produção privada, a plataforma Sites autentica o proprietário. Se o wrapper npm deste Windows falhar, use node scripts/run-framework.mjs dev/build, ou o npm-cli.js instalado no Node.
+```sh
+npm run test
+npm run typecheck
+npm run lint
+npm run build
+```
 
-## Validação
-node --test tests/domain.test.mjs
-node node_modules/typescript/bin/tsc --noEmit
+Os testes de UI usam jsdom para verificar DOM e fluxos locais; não medem layout, desempenho de vídeo ou dimensões reais no navegador. Antes de publicar, confira visualmente em 320/390 px, orientação horizontal, teclado móvel e desktop.
 
-## Antes de operação real
-Definir provedor de pagamento, autenticação pública e papéis independentes, comunidade compartilhada, provedor de IA, revisão dos planos por profissionais, perguntas finais da anamnese e tratamento/consentimento para dados de saúde. Esta entrega é uma demonstração, conforme solicitado.
+## Biblioteca local
 
-## Imagem
-Logo fornecido pelo usuário. Fotografia: Anastase Maragos / Unsplash, https://unsplash.com/photos/athlete-holding-heavy-kettlebells-in-a-dark-gym-NY6uRbKx89M, Unsplash License.
+Copie `.env.example` para `.env.local` e preencha somente `SIM_VIDEO_DIR` com a pasta que contém `indice-videos.csv` e os MP4 originais. O servidor aceita também `--video-dir <pasta>` e `--port 5174`. O preview vincula vídeos sob demanda, sem autoplay ou preload de mídia. O catálogo contém somente metadados. Mudar a porta exige passar `mediaOrigin` ao mount da interface.
+
+Não copie vídeos, PDFs privados, credenciais ou diretórios temporários para o Git. `.env.local`, `.qa/`, dependências e builds são ignorados; `.env.example` é apenas um template público sem chaves. O build não precisa de OpenAI.
+
+## Planos e responsáveis
+
+- Mensal: R$ 499.
+- Trimestral: R$ 1.197, em 3x de R$ 399.
+- Semestral: R$ 1.794, em 6x de R$ 299.
+- Parcelamento sem acréscimo ao aluno; custo absorvido pelo vendedor. Gateway e taxas efetivas ainda precisam ser escolhidos.
+- Anual/projeto personalizado: formulário de interesse que cria ou atualiza um lead **somente no CRM local da demonstração**, sem contato externo.
+
+Bruno: @treinadorbrunobarbosa. Nutrição: Sanches; nome civil, CRN exato, base alimentar e porções validadas permanecem pendentes. O administrador pretendido é brunobarbosapersonal@yahoo.com.br; nenhum usuário privilegiado ou conta foi criado.
+
+## Fronteira entre demonstração e produção
+
+Em loopback, dados fictícios ficam em localStorage deste navegador. A troca Aluno/Equipe é um controle demonstrativo, sem autorização real de papéis. Não use dados pessoais, de saúde ou credenciais reais. Cadastro, interesse, revisão nutricional e chat não enviam convites, não realizam pagamentos e não chamam IA. Reload preserva registros e a etapa de onboarding; cadastro duplicado usa e-mail normalizado.
+
+Fora de loopback, esta UI mostra uma prévia sem formulários ativos ou armazenamento demonstrativo. As rotas protegidas mantêm a autenticação ChatGPT/Sites antiga. `?legacy=1` fica disponível somente em desenvolvimento; a implementação antiga e seus testes permanecem no repo, mas não representam uma operação comercial pronta.
+
+Antes de uso real: implementar autenticação independente e autorização de papéis, backend/persistência por usuário, convites seguros, gateway/webhooks/idempotência de pagamento, tratamento de consentimento e dados de saúde, IA no servidor com revisão profissional, anamnese completa e avaliação de 17 fotos. Nenhuma dessas integrações é apresentada como concluída por esta entrega. Não há commit, push ou deploy automático.
+
+## Marca
+
+`public/sim/logo.svg` contém os primeiros 12 paths da marca SHAPE IS/MONEY no PDF fornecido, região x75,59–242,62 / y295,89–432,39. TANGRAM e 75HARD foram excluídos. Os paths originais e seus transforms são preservados.
+
+### Chat de IA local
+
+Em outro terminal, execute `npm run dev:ai` (Node 24 com `--use-system-ca`). O serviço escuta somente `127.0.0.1:5174`; o chat da equipe em `http://127.0.0.1:5173/crm` envia apenas uma de três perguntas fictícias preparadas, após consentimento. Também pode abrir `http://127.0.0.1:5174/crm`. Configure `OPENAI_API_KEY` somente em `.env.local` e, opcionalmente, `OPENAI_MODEL`. A chave nunca integra os assets ou respostas. Erros de rede, credencial, cota e resposta incompleta aparecem como erros, sem respostas simuladas de sucesso.
+
+O endpoint verifica Host, Origin e endereço loopback; limita requisição a 2 KB, resposta upstream a 32 KB, texto a 4.000 caracteres, tempo a 20 segundos e cinco solicitações por minuto, sem concorrência. Em NODE_ENV=production retorna 404. Não existe endpoint de IA público autenticado nesta etapa. Nenhuma escrita de CRM, aluno ou plano é executada pela IA; propostas dependem de revisão profissional. Login próprio, RBAC e banco persistente serão necessários antes de ativar dados reais ou publicar na VPS. Não reutilizar serviços dos projetos existentes no EasyPanel sem uma avaliação e autorização específicas.
+
+### Primeira fatia persistente independente
+
+`npm run dev:backend` abre `http://127.0.0.1:5190/local`, com a mesma identidade visual e assets canônicos, mas separado da demo/localStorage. Requer Node 24. O SQLite local fica em `.qa/local-backend/app.sqlite`, ignorado no Git; migrations versionadas com checksum rodam na inicialização. O banco começa vazio e **nenhuma conta ou administrador é provisionado**. Contas fictícias existem apenas nas fixtures de testes, em diretórios temporários isolados. A UI permite login, cadastro manual com revisão/confirmação, onboarding no servidor e treino rascunho → revisão → aprovação profissional → publicação. Cadastro de aluno não cria acesso nem envia convite.
+
+Sessões opacas aleatórias têm somente o hash armazenado no banco, expiram em oito horas e são revogadas no logout; cookies locais HttpOnly/SameSite=Strict. Senhas usam scrypt N=32768/r=8/p=1, sal aleatório e comparação constante via Node crypto. O papel e vínculo são sempre consultados no servidor. Personal vê seus alunos; nutri vê apenas alunos vinculados; aluno vê somente seu registro e treinos publicados, sem notas internas. Mutações exigem Origin da mesma origem; cadastro/planos/onboarding exigem chave de idempotência, validam entradas, detectam duplicatas e registram auditoria. Ações futuras do chat devem usar esse mesmo serviço validado, sem conceder escrita direta ao modelo.
+
+**Checkpoint de release, sem deploy realizado:** a camada de persistência é assíncrona; PostgreSQL tem adaptador, migrations transacionais/checksummed e testes SQL em PostgreSQL embarcado. O SQLite continua exclusivo de desenvolvimento. A inicialização de produção exige origem HTTPS canônica, IPs explícitos do proxy, papel de banco limitado e migrations correspondentes; não há fallback SQLite nem seeds. Cookies de produção são Secure/HttpOnly/SameSite e usam prefixo __Host-. Dockerfile, Compose isolado, healthcheck e handoff estão em [deploy/README.md](deploy/README.md). Falta homologar imagens/containers, conexão real pg pela rede, HTTPS/proxy e backup/restore em ambiente aprovado: esta máquina não possui Docker/PostgreSQL nativo. O destino é o novo serviço `medsi/shape-is-money`; preservar `medsi/app` e todos os serviços de `askadia`, com banco/volume/configuração exclusivos. Nenhum dado da demo será migrado automaticamente.
+
+Handoff de acesso: após aprovação explícita, provisionar a organização e o administrador pretendido por um comando de uso único no servidor, com senha definida pelo próprio usuário/fluxo seguro e nunca em argumentos, arquivos públicos ou logs. `brunobarbosapersonal@yahoo.com.br` ainda não é uma conta deste backend. Convites, envio de e-mail, reset de senha, nutrição persistente, edição/versionamento de planos e uploads autenticados seguem pendentes; os endpoints de upload/convite retornam indisponibilidade, sem processamento de arquivo. Pagamentos ficam para depois. Usar somente dados fictícios nesta fase local.
+
+Referências de implementação: [Node 24 SQLite](https://nodejs.org/docs/latest-v24.x/api/sqlite.html) e [Node 24 crypto/scrypt](https://nodejs.org/docs/latest-v24.x/api/crypto.html#cryptoscryptpassword-salt-keylen-options-callback).
+
+### IA no fluxo autenticado
+
+O backend persistente oferece `/api/local/ai`, exigindo sessão válida e papel de personal/nutrição. O papel vem do banco, nunca do payload. O cliente escolhe somente exemplos sintéticos definidos no servidor; nenhum dado do CRM é enviado e nenhum plano/aluno é alterado. Para desenvolvimento, `dev:backend` lê `.env.local` apenas no processo servidor; `SIM_AI_ENABLED=false` é o padrão. Ao habilitar explicitamente com a chave dev já configurada, a UI usa Responses API real; erros permanecem erros. Testes automatizados usam provider mock, sem novas chamadas pagas. Produção não recebe automaticamente a chave dev; acesso e segredos de produção exigem handoff separado aprovado.

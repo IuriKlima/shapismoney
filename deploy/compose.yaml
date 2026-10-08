@@ -1,0 +1,78 @@
+name: shape-is-money
+services:
+  shape-is-money-db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: sim_platform
+      POSTGRES_USER: sim_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_bootstrap
+      SIM_MIGRATOR_PASSWORD_FILE: /run/secrets/db_migrator
+      SIM_APP_PASSWORD_FILE: /run/secrets/db_app
+    secrets: [db_bootstrap, db_migrator, db_app]
+    volumes:
+      - sim_db_data:/var/lib/postgresql/data
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/10-sim.sh:ro
+    networks: [private]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U sim_bootstrap -d sim_platform"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  migrate:
+    image: shape-is-money-backend:reviewed
+    build: {context: .., dockerfile: deploy/Dockerfile}
+    command: [node, backend/migrate.mjs]
+    environment:
+      PGHOST: shape-is-money-db
+      PGDATABASE: sim_platform
+      PGUSER: sim_migrator
+      PGPASSWORD_FILE: /run/secrets/db_migrator
+      SIM_DB_TLS: private-network
+    secrets: [db_migrator]
+    depends_on:
+      shape-is-money-db: {condition: service_healthy}
+    networks: [private]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+  shape-is-money:
+    image: shape-is-money-backend:reviewed
+    build: {context: .., dockerfile: deploy/Dockerfile}
+    environment:
+      NODE_ENV: production
+      SIM_BACKEND_PORT: "5190"
+      SIM_PRODUCTION_REVIEWED: ${SIM_PRODUCTION_REVIEWED:?review required}
+      SIM_PUBLIC_ORIGIN: ${SIM_PUBLIC_ORIGIN:?HTTPS origin required}
+      SIM_TRUSTED_PROXY_IPS: ${SIM_TRUSTED_PROXY_IPS:?exact proxy IPs required}
+      PGHOST: shape-is-money-db
+      PGDATABASE: sim_platform
+      PGUSER: sim_app
+      PGPASSWORD_FILE: /run/secrets/db_app
+      SIM_DB_TLS: private-network
+      SIM_AI_ENABLED: "false"
+    secrets: [db_app]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    networks: [private, ingress]
+    expose: ["5190"]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+networks:
+  private: {internal: true}
+  ingress:
+    external: true
+    name: ${SIM_PROXY_NETWORK:?actual proxy network required}
+volumes:
+  sim_db_data:
+secrets:
+  db_bootstrap:
+    file: ${SIM_DB_BOOTSTRAP_SECRET_FILE:?approved secret file required}
+  db_migrator:
+    file: ${SIM_DB_MIGRATOR_SECRET_FILE:?approved secret file required}
+  db_app:
+    file: ${SIM_DB_APP_SECRET_FILE:?approved secret file required}

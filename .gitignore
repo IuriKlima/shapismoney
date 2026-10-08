@@ -47,3 +47,6 @@ next-env.d.ts
 
 /.qa/
 *.tsbuildinfo
+
+# Public configuration template: no credentials.
+!.env.example

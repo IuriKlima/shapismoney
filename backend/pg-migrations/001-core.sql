@@ -1,0 +1,12 @@
+CREATE TABLE organizations(id TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE users(id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES organizations(id), email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','coach','nutrition','student')), password_hash TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
+CREATE TABLE students(id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES organizations(id), user_id TEXT UNIQUE REFERENCES users(id), coach_id TEXT NOT NULL REFERENCES users(id), nutrition_id TEXT REFERENCES users(id), email TEXT NOT NULL, name TEXT NOT NULL, internal_note TEXT NOT NULL DEFAULT '', onboarding TEXT NOT NULL DEFAULT '{}', revision INTEGER NOT NULL DEFAULT 1, UNIQUE(org_id,email));
+CREATE TABLE sessions(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at BIGINT NOT NULL);
+CREATE TABLE login_attempts(bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at BIGINT NOT NULL);
+CREATE TABLE plans(id TEXT PRIMARY KEY, student_id TEXT NOT NULL REFERENCES students(id), author_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('draft','review','approved','published')), revision INTEGER NOT NULL DEFAULT 1, approved_by TEXT REFERENCES users(id), approved_revision INTEGER, published_at BIGINT);
+CREATE TABLE operations(actor_id TEXT NOT NULL REFERENCES users(id), operation_key TEXT NOT NULL, request_hash TEXT NOT NULL, status INTEGER NOT NULL, result TEXT NOT NULL, PRIMARY KEY(actor_id,operation_key));
+CREATE TABLE audit(id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES organizations(id), actor_id TEXT NOT NULL REFERENCES users(id), student_id TEXT REFERENCES students(id), event TEXT NOT NULL, created_at BIGINT NOT NULL);
+CREATE INDEX sessions_expiry ON sessions(expires_at);
+CREATE INDEX students_coach ON students(coach_id);
+CREATE INDEX students_nutrition ON students(nutrition_id);
+CREATE INDEX plans_student ON plans(student_id,status);
