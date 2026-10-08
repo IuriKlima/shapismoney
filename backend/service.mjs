@@ -1,3 +1,4 @@
+import {serviceFlow} from './service-sla.mjs';
 import {monthlyBudget} from './ai-monthly-budget.mjs';
 import {nutritionFlow} from './nutrition.mjs';
 import {aiChatFlow} from './ai-chat.mjs';
@@ -50,7 +51,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     return await mutation(actor,req,body,async()=>{await store.lockStudent(row.id);const current=await student(actor,row.id);if(body.revision!==current.revision)deny(409,'Dados mudaram. Recarregue antes de salvar.');
       const updated=await store.run('UPDATE students SET onboarding=?,revision=revision+1 WHERE id=? AND org_id=? AND revision=?',JSON.stringify({goal:body.goal,days:body.days,experience:body.experience,context}),row.id,actor.org_id,body.revision);
       if(updated.changes!==1)deny(409,'Dados mudaram. Recarregue antes de salvar.');
-      await audit(actor,row.id,event);return {status:200,data:{student:studentDTO(await student(actor,row.id),actor)}};});
+      await audit(actor,row.id,event);await sla.changed(actor,row.id,body.revision+1);return {status:200,data:{student:studentDTO(await student(actor,row.id),actor)}};});
   }
   async function read(req){
     if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))deny(415,'Envie JSON.');
@@ -70,6 +71,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
 
     return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
   }
+  const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit});
   const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
   const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student,audit});
@@ -97,6 +99,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const serviceResult=await sla.handle(actor,req,route);if(serviceResult)return send(serviceResult.status,serviceResult.data);
       const budgetResult=await budget.handle(actor,req,route);if(budgetResult)return send(budgetResult.status,budgetResult.data);
       const chatResult=await chatFlow.handle(actor,auth,req,route);if(chatResult)return send(chatResult.status,chatResult.data);
       if(route==='/api/local/ai/capabilities'&&req.method==='GET')return send(200,aiCapabilities(actor.role,ai));
