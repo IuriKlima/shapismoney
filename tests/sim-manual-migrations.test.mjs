@@ -1,0 +1,12 @@
+import {execFileSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {PGlite} from '@electric-sql/pglite';
+const names=['001-core.sql','002-invitations.sql','003-execution.sql','004-nutrition.sql','005-ai-monthly-budget.sql','006-service-sla.sql'];
+const files=names.map(name=>{const bytes=execFileSync('git',['show','fd0bd753658e5cd78b0b3e4ca969911612f7bd44:backend/pg-migrations/'+name]);return {name,sql:bytes.toString(),checksum:createHash('sha256').update(bytes).digest('hex')};});
+const script=readFileSync(new URL('../deploy/manual-migrate-004-006.sh',import.meta.url),'utf8');
+const sql=script.split("<<'SHAPE_SQL'\n")[1].split('SHAPE_SQL\n')[0];
+async function legacy(count){const db=new PGlite();await db.exec('CREATE ROLE sim_app NOSUPERUSER NOCREATEDB NOCREATEROLE;CREATE ROLE sim_migrator NOSUPERUSER NOCREATEDB NOCREATEROLE;CREATE SCHEMA sim AUTHORIZATION sim_migrator;GRANT USAGE ON SCHEMA sim TO sim_app;SET ROLE sim_migrator;SET search_path=sim,pg_catalog;CREATE TABLE schema_migrations(name TEXT PRIMARY KEY,checksum TEXT NOT NULL);');for(const f of files.slice(0,count)){await db.exec(f.sql);await db.query('INSERT INTO schema_migrations VALUES ($1,$2)',[f.name,f.checksum]);}await db.exec('RESET ROLE');return db;}
+for(const count of [3,4,5,6]){const db=await legacy(count);await db.exec(sql);await db.exec('RESET ROLE');await db.exec(sql);if(Number((await db.query('SELECT COUNT(*) n FROM schema_migrations')).rows[0].n)!==6)throw Error('Catalog count');await db.exec("RESET ROLE;SET ROLE sim_migrator;UPDATE schema_migrations SET checksum='invalid' WHERE name='006-service-sla.sql';RESET ROLE;");let refused=false;try{await db.exec(sql);}catch{refused=true;}if(!refused)throw Error('Corrupt catalog accepted');await db.close();}
+const rollback=await legacy(3);let rejected=false;try{await rollback.exec(sql.replace('DO $apply1$',"DO $fail$ BEGIN RAISE EXCEPTION 'synthetic rollback check'; END $fail$;\nDO $apply1$"));}catch{rejected=true;}if(!rejected)throw Error('Rollback not tested');await rollback.exec('ROLLBACK');if(Number((await rollback.query('SELECT COUNT(*) n FROM schema_migrations')).rows[0].n)!==3)throw Error('Partial catalog committed');if((await rollback.query("SELECT to_regclass('sim.nutrition_plans') AS t")).rows[0].t!==null)throw Error('Partial DDL persisted');await rollback.close();
+console.log('Manual packet: prefixes 3/4/5/6, idempotency, checksum rejection and transactional rollback passed.');
