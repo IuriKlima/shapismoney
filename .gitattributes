@@ -1,0 +1,4 @@
+# Migration checksums and POSIX scripts require stable LF bytes on every checkout.
+backend/migrations/*.sql text eol=lf
+backend/pg-migrations/*.sql text eol=lf
+deploy/*.sh text eol=lf
