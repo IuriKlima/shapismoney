@@ -41,3 +41,28 @@ test('adapter uses context-specific schema and rejects invalid context before mo
 test('application mock generation refuses short reasons and repeated weekdays without creating drafts or refunding reservations',async()=>{
  for(const [mutate,status] of [[v=>{v.sessions[0].exercises[0].reason='x';},502],[v=>{v.sessions[1].weekday=v.sessions[0].weekday;},400]]){const f=await sessionsFixture({fetchImpl:async(_u,o)=>{const value=fixtureSessionPayload(JSON.parse(JSON.parse(o.body).input));mutate(value);return fixtureResponse(value);}});try{await f.consent();const response=await f.prepare();assert.equal(response.status,status);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM plans').n,0);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM ai_monthly_reservations').n,1);assert.ok(!JSON.stringify(response.data).includes('fixture-only-not-a-real-api-key'));}finally{await f.close();}}
 });
+
+
+test('contextual evidence and catalog enums reject plausible labels, values, empty arrays and unknown IDs independently',()=>{
+ const f=context(),schema=trainingProposalSchemaFor(f.input),properties=schema.properties.sessions.items.properties.exercises.items.properties;
+ assert.deepEqual(properties.evidence.items.enum,['environment','days']);assert.deepEqual(properties.exerciseId.enum,['fixture-0','fixture-1']);assert.deepEqual(properties.ruleId.enum,['fixture-rule']);
+ for(const target of ['exercise','alternative'])for(const evidence of [['Dias disponíveis'],['fixture-gym'],['2'],['unknown'],[],['days','unknown']]){
+  const value=structuredClone(f.payload),item=target==='exercise'?value.sessions[0].exercises[0]:value.sessions[0].exercises[0].alternatives[0];item.evidence=evidence;
+  assert.throws(()=>validateSchema(value,schema));assert.throws(()=>f.validate(value),e=>e.validationDiagnostic.rule==='fact-evidence');
+ }
+ for(const target of ['exercise','alternative'])for(const key of ['exerciseId','ruleId']){
+  const value=structuredClone(f.payload),item=target==='exercise'?value.sessions[0].exercises[0]:value.sessions[0].exercises[0].alternatives[0];item[key]='Invented plausible label';
+  assert.throws(()=>validateSchema(value,schema),e=>e.validationDiagnostic.rule==='enum');assert.throws(()=>f.validate(value));
+ }
+ const changed=structuredClone(f.input);changed.untrustedFacts.schedule='Schedule value';changed.untrustedFacts.unapproved_fact='not transferable';changed.untrustedMethod.exercises[1].environments=['other-environment'];changed.untrustedMethod.exercises.push({...changed.untrustedMethod.exercises[0],id:'pending',status:'pending'});
+ changed.untrustedMethod.rules.push({id:'missing-source',sourceId:'unknown',section:'section'});
+ const other=trainingProposalSchemaFor(changed).properties.sessions.items.properties.exercises.items.properties;
+ assert.deepEqual(other.evidence.items.enum,['environment','days','schedule']);assert.deepEqual(other.exerciseId.enum,['fixture-0']);assert.deepEqual(other.ruleId.enum,['fixture-rule']);
+ const changedPayload=structuredClone(f.payload);changedPayload.sessions[0].exercises[0].evidence=['schedule'];assert.throws(()=>validateSchema(changedPayload,schema));
+ changedPayload.sessions=[changedPayload.sessions[0]];changedPayload.daysPerWeek=1;changedPayload.sessions[0].exercises[0].alternatives=[];validateSchema(changedPayload,trainingProposalSchemaFor(changed));
+});
+
+test('rule allowlist requires existing source, version, hash and section, never accepts invented references',()=>{
+ for(const mutate of [v=>{v.untrustedMethod.sources=[];},v=>{v.untrustedMethod.sources[0].version='';},v=>{v.untrustedMethod.sources[0].sha256='invented';},v=>{v.untrustedMethod.rules[0].section='';},v=>{v.untrustedMethod.rules[0].sourceId='Source display label';}]){const f=context();mutate(f.input);assert.throws(()=>trainingProposalSchemaFor(f.input),/context unavailable/);}
+ const f=context(),value=structuredClone(f.payload);value.sessions[0].exercises[0].sourceId='fixture-source';assert.throws(()=>validateSchema(value,trainingProposalSchemaFor(f.input)),e=>e.validationDiagnostic.rule==='object-fields');
+});
