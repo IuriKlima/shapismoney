@@ -29,3 +29,5 @@
 !public/sim/access-ui.js
 
 !public/sim/training-session-editor.js
+
+!public/sim/nutrition-proposal-ui.js
