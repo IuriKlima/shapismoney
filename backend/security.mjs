@@ -17,7 +17,11 @@ export function productionSecurity(env){
 export function assertRequest(req,security,{health=false}={}){
   const peer=req.socket.remoteAddress;const local=['127.0.0.1','::ffff:127.0.0.1','::1'].includes(peer);
   if(health&&local)return {clientIP:peer};
-  if(req.headers['sec-fetch-site']==='cross-site')fail('Requisição externa bloqueada.');
+  // Only public entry documents can be reached by top-level links (e.g. Gmail).
+  // Fetch Metadata never bypasses canonical host, proxy, staging or Origin checks.
+  const entry=typeof req.url==='string'?req.url.split('?')[0]:'';
+  const publicNavigation=['GET','HEAD'].includes(req.method)&&['/','/local'].includes(entry)&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
+  if(req.headers['sec-fetch-site']==='cross-site'&&!publicNavigation)fail('Requisição externa bloqueada.');
   let origin;
   if(security.production){
     const normalized=peer?.startsWith('::ffff:')?peer.slice(7):peer;
@@ -26,10 +30,10 @@ export function assertRequest(req,security,{health=false}={}){
     if(!security.proxies.includes(normalized)||(!canonicalHost&&!forwardedHost)||req.headers['x-forwarded-proto']!=='https')fail('Proxy HTTPS inválido.');
     const ip=req.headers['x-forwarded-for'];if(typeof ip!=='string'||!isIP(ip))fail('Identidade de rede inválida.');
     if(security.stage==='staging'&&!security.clients.includes(ip))fail('Acesso de homologação restrito.');
-    origin=security.origin;if(req.method!=='GET'&&req.headers.origin!==origin)fail('Origem inválida.');return {clientIP:ip};
+    origin=security.origin;if((req.method!=='GET'&&!publicNavigation||publicNavigation&&req.headers.origin!==undefined)&&req.headers.origin!==origin)fail('Origem inválida.');return {clientIP:ip};
   }
   let host;try{host=new URL('http://'+req.headers.host);}catch{fail('Host inválido.');}
   if(!local||!['127.0.0.1','localhost'].includes(host.hostname)||req.headers.host!==host.host)fail('Somente loopback.');
-  origin='http://'+host.host;if(req.method!=='GET'&&req.headers.origin!==origin)fail('Origem inválida.');return {clientIP:peer};
+  origin='http://'+host.host;if((req.method!=='GET'&&!publicNavigation||publicNavigation&&req.headers.origin!==undefined)&&req.headers.origin!==origin)fail('Origem inválida.');return {clientIP:peer};
 }
 export const cookieHeader=(security,token,maxAge)=>security.cookieName+'='+token+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+maxAge+(security.production?'; Secure':'');
