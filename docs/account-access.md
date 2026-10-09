@@ -8,6 +8,26 @@ Com transporte habilitado, o cadastro enfileira boas-vindas com o endereço norm
 
 ## Transporte pendente
 
+### Contrato exato de ambiente SMTP
+
+| Variável | Valor/condição do runtime |
+| --- | --- |
+| `SIM_ACCESS_EMAIL_ENABLED` | `false` ou ausente desliga tudo e não lê segredo; somente a string `true` habilita a conferência |
+| `SIM_ACCESS_EMAIL_REVIEWED` | Deve ser exatamente `true` para ativação; manter `false` enquanto pendente |
+| `SIM_MAIL_PROVIDER` | `smtp`, sem valor padrão no código |
+| `SIM_MAIL_FROM` | Endereço simples do remetente, sem nome de exibição, até 254 caracteres ASCII |
+| `SIM_SMTP_HOST` | Host DNS confirmado do provedor; não há padrão no código |
+| `SIM_SMTP_PORT` | String `465` para TLS implícito ou `587` para STARTTLS obrigatório; ausente falha fechado. O template público sugere `465` |
+| `SIM_SMTP_USER` | Endereço completo da caixa, exatamente igual a `SIM_MAIL_FROM` |
+| `SIM_SMTP_PASSWORD_FILE` | Em produção, caminho exato `/run/secrets/sim_smtp_password`, montado privadamente |
+| `SIM_PUBLIC_ORIGIN` | Origem HTTPS canônica aprovada, sem caminho, query ou credenciais; usada para os links e conferida pelo contrato de segurança de produção |
+
+Não existem variáveis para desligar TLS ou a verificação de certificado. `secure` é `true` somente na porta 465; `requireTLS=true`, `tls.servername=SIM_SMTP_HOST`, `tls.rejectUnauthorized=true` e `tls.minVersion=TLSv1.2` permanecem fixos. Conexão e saudação têm limite de 5 segundos; socket, 8 segundos; o worker limita o despacho a 10 segundos. `pool`, `logger` e `debug` ficam desabilitados. Nenhuma conexão é aberta pela simples leitura da configuração: o transporte é carregado quando o worker despacha uma mensagem autorizada.
+
+O servidor lê `process.env` no startup e, somente com os dois gates habilitados e metadados válidos, lê o arquivo privado uma vez. A imagem inicia `node backend/server.mjs`, sem carregar `.env.local` automaticamente; suas variáveis devem vir da configuração do container. O script local `dev:backend` usa `--env-file-if-exists=.env.local`. Não há recarga dinâmica: mudar metadados ou arquivo exige reinício coordenado. Os gates preexistentes de produção, origem/proxy e banco continuam obrigatórios.
+
+O arquivo e seus diretórios não podem ser symlinks. Em Linux, proprietário deve ser root ou o UID do processo; escrita/execução de grupo e qualquer acesso de outros são rejeitados (`mode & 0o037` deve ser zero). Exemplo admissível: arquivo `0440`, proprietário root e grupo do processo. Conteúdo de 1–4096 bytes, após `trim`, deve conter somente ASCII imprimível sem espaços. Nenhum valor de senha é aceito via variável de ambiente pelo adaptador. `SIM_MAIL_API_KEY_FILE` pertence somente ao candidato Resend e não é usado com `SIM_MAIL_PROVIDER=smtp`.
+
 A preferência é concentrar o e-mail na Hostinger. O adaptador SMTP está preparado, sem pressupor caixa ou plano já contratado. Metadados necessários: `SIM_MAIL_PROVIDER=smtp`, host confirmado em `SIM_SMTP_HOST`, porta 465 (TLS direto) ou 587 (STARTTLS obrigatório), `SIM_SMTP_USER` igual ao remetente em `SIM_MAIL_FROM` e `SIM_SMTP_PASSWORD_FILE=/run/secrets/sim_smtp_password`. A senha deve existir somente no armazenamento privado do servidor. Verificação de certificado e hostname permanece obrigatória, com TLS mínimo 1.2; não há logs de SMTP, pooling, acesso a arquivo/URL nas mensagens ou retentativa automática. Consulte o [contrato SMTP do Nodemailer](https://nodemailer.com/smtp). O remetente e o domínio ainda dependem da conferência da caixa no hPanel. Não há criação de conta, compra de plano, servidor de e-mail na VPS ou envio real nesta entrega.
 
 Não há SMTP/provedor/remetente existente nos exemplos do repositório. Nenhuma conta externa, credencial ou mensagem real foi criada. Resend é apenas adaptador candidato, sujeito à escolha do responsável; consulte o [contrato oficial de envio](https://resend.com/docs/api-reference/emails/send-email).
