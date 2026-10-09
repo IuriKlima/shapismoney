@@ -1,6 +1,6 @@
 import {INTAKE_VERSION,CONSENT_VERSION,validateIntake} from '../public/sim/intake-fields.js';
 export const TRAINING_INPUT_FIELDS=Object.freeze(['age','height_m','weight_kg','main_goal','training_history','current_training','environment','days','schedule','liked_exercises','difficult_exercises','injuries','fractures','restrictions']);
-export function proposalSpecs({store,deny,exact,text,student,safety,configuration}){
+export function proposalSpecs({store,deny,exact,text,student,safety,configuration={}}){
  const mode=()=>configuration.mode||'local-simulation';
  const method=kind=>configuration.methodologies?.[kind]||configuration.methodology;
  async function intakeFor(row){const a=await store.get('SELECT * FROM anamneses WHERE student_id=? AND org_id=?',row.id,row.org_id);if(!a?.training_consent||a.version!==INTAKE_VERSION||a.status!=='complete'||a.reviewed_revision!==a.revision)deny(409,'Conclua e revise a anamnese atual antes de preparar uma proposta.');let answers;try{answers=validateIntake(JSON.parse(a.answers),{complete:true});}catch{deny(409,'Respostas atuais incompletas ou inválidas.');}const c=await safety.consent(row,{kind:'training',mode:mode()});return {a,answers,c};}
@@ -11,18 +11,44 @@ export function proposalSpecs({store,deny,exact,text,student,safety,configuratio
   return {row,intake:a,consent:c,risk,facts:Object.fromEntries(TRAINING_INPUT_FIELDS.filter(k=>k in answers).map(k=>[k,answers[k]])),references:{studentRevision:row.revision,coach:row.coach_id,user:row.user_id,intakeRevision:a.revision,reviewer:a.reviewed_by,consentSequence:c.sequence,riskSequence:risk.sequence||0,riskResolved:risk.resolved}};
  }
  function trainingValidate(payload,c){
-  const canonical=Object.hasOwn(payload||{},'sessions');exact(payload,canonical?['title','daysPerWeek','sessions']:['title','daysPerWeek','exercises']);text(payload.title,2,100);
-  if(!canonical&&mode()!=='local-simulation')deny(400,'Proposta externa exige sessões completas.');
-  if(!Number.isInteger(payload.daysPerWeek)||payload.daysPerWeek<1||payload.daysPerWeek>c.facts.days)deny(400,'Frequência deve respeitar os dias disponíveis informados.');
+  // Diagnostics contain trusted field paths/rule codes only, never submitted values.
+  const reject=(status,message,field,rule)=>{try{deny(status,message);}catch(error){error.validationDiagnostic={stage:'prescription',field,rule};throw error;}throw Error('Validator deny must throw');};
+  const shape=(value,keys,field)=>{try{exact(value,keys);}catch{reject(400,'Campos inválidos.',field,'object-fields');}};
+  const label=(value,min,max,field)=>{try{return text(value,min,max);}catch{reject(400,'Texto inválido.',field,'string-length-or-control');}};
+  const methodology=method('training');
+  if(!methodology||!Array.isArray(methodology.exercises)||!Array.isArray(methodology.rules))reject(503,'Metodologia indisponível para validação.','$.configuration.methodology','methodology-required');
+  if(!c?.facts||!Number.isInteger(c.facts.days)||c.facts.days<1||c.facts.days>7||!Array.isArray(c.facts.environment))reject(400,'Contexto indisponível para validação.','$.facts','context-required');
+  const canonical=Object.hasOwn(payload||{},'sessions');shape(payload,canonical?['title','daysPerWeek','sessions']:['title','daysPerWeek','exercises'],'$');label(payload.title,2,100,'$.title');
+  if(!canonical&&mode()!=='local-simulation')reject(400,'Proposta externa exige sessões completas.','$.sessions','complete-sessions-required');
+  if(!Number.isInteger(payload.daysPerWeek)||payload.daysPerWeek<1||payload.daysPerWeek>c.facts.days)reject(400,'Frequência deve respeitar os dias disponíveis informados.','$.daysPerWeek','available-days');
   const sessions=canonical?payload.sessions:[{id:'session-1',name:'Sessão de teste',weekday:1,exercises:payload.exercises}];
-  if(!Array.isArray(sessions)||sessions.length<1||sessions.length>7||canonical&&sessions.length!==payload.daysPerWeek||new Set(sessions.map(s=>s.id)).size!==sessions.length||new Set(sessions.map(s=>s.weekday)).size!==sessions.length)deny(400,'Cada dia prescrito exige uma sessão única.');
-  const output=sessions.map(s=>{if(canonical)exact(s,['id','name','weekday','exercises']);if(typeof s.id!=='string'||! /^[a-zA-Z0-9_-]{1,80}$/.test(s.id)||!Number.isInteger(s.weekday)||s.weekday<1||s.weekday>7)deny(400,'Sessão ou dia semanal inválido.');text(s.name,2,100);
-   if(!Array.isArray(s.exercises)||s.exercises.length<1||s.exercises.length>12)deny(400,'Use 1-12 exercícios por sessão.');
-   const exercises=s.exercises.map(e=>{exact(e,['exerciseId','sets','reps','restSeconds','rir','reason','evidence','ruleId',...(canonical?['alternatives']:[])]);const item=method('training').exercises.find(x=>x.id===e.exerciseId&&x.status==='approved');if(!item||!item.environments.some(v=>c.facts.environment.includes(v)))deny(400,'Exercício não aprovado ou incompatível com o ambiente informado.');
-    if(!Number.isInteger(e.sets)||e.sets<1||e.sets>10||!Number.isInteger(e.reps)||e.reps<1||e.reps>50||!Number.isInteger(e.restSeconds)||e.restSeconds<0||e.restSeconds>600||!Number.isInteger(e.rir)||e.rir<0||e.rir>10)deny(400,'Parâmetros de exercício inválidos.');
-    if(!Array.isArray(e.evidence)||e.evidence.length<1||e.evidence.length>5||e.evidence.some(k=>!Object.hasOwn(c.facts,k))||!method('training').rules.some(r=>r.id===e.ruleId))deny(400,'Justifique cada exercício com evidências e referência disponíveis.');const rule=method('training').rules.find(r=>r.id===e.ruleId),source=method('training').sources?.find(s=>s.id===rule.sourceId);if(canonical&&(!source||! /^[a-f0-9]{64}$/.test(source.sha256)||!source.version||!rule.section))deny(400,'Source provenance unavailable');const reference=source?{ruleId:rule.id,sourceId:source.id,sourceVersion:source.version,sourceSha256:source.sha256,section:rule.section}:undefined;
-    let alternatives;if(canonical){if(!Array.isArray(e.alternatives)||e.alternatives.length>4||new Set(e.alternatives.map(a=>a.exerciseId)).size!==e.alternatives.length)deny(400,'Alternatives require distinct catalog IDs');alternatives=e.alternatives.map(a=>{exact(a,['exerciseId','reason','evidence','ruleId']);const alternative=method('training').exercises.find(x=>x.id===a.exerciseId&&x.status==='approved');if(!alternative||a.exerciseId===e.exerciseId||!item.allowedAlternativeIds?.includes(a.exerciseId)||!alternative.environments.some(v=>c.facts.environment.includes(v))||a.ruleId!==e.ruleId||!Array.isArray(a.evidence)||!a.evidence.length||a.evidence.some(k=>!Object.hasOwn(c.facts,k)))deny(400,'Alternative is not explicitly reviewed for this exercise and context');return {...a,name:text(alternative.name,2,100),reason:text(a.reason,8,500),reference};});}
-    return {...e,name:text(item.name,2,100),reason:text(e.reason,8,500),...(reference?{reference}:{}),...(canonical?{alternatives}: {})};
+  if(!Array.isArray(sessions)||sessions.length<1||sessions.length>7||canonical&&sessions.length!==payload.daysPerWeek)reject(400,'Cada dia prescrito exige uma sessão única.','$.sessions','session-count');
+  const ids=new Set(),weekdays=new Set();
+  const output=sessions.map((s,i)=>{const field='$.sessions['+i+']';if(canonical)shape(s,['id','name','weekday','exercises'],field);
+   if(typeof s.id!=='string'||! /^[a-zA-Z0-9_-]{1,80}$/.test(s.id))reject(400,'Sessão ou dia semanal inválido.',field+'.id','session-id');
+   if(ids.has(s.id))reject(400,'Cada dia prescrito exige uma sessão única.',field+'.id','unique-session-id');ids.add(s.id);
+   if(!Number.isInteger(s.weekday)||s.weekday<1||s.weekday>7)reject(400,'Sessão ou dia semanal inválido.',field+'.weekday','weekday-range');
+   if(weekdays.has(s.weekday))reject(400,'Cada dia prescrito exige uma sessão única.',field+'.weekday','unique-weekday');weekdays.add(s.weekday);label(s.name,2,100,field+'.name');
+   if(!Array.isArray(s.exercises)||s.exercises.length<1||s.exercises.length>12)reject(400,'Use 1-12 exercícios por sessão.',field+'.exercises','exercise-count');
+   const exercises=s.exercises.map((e,j)=>{const ef=field+'.exercises['+j+']';shape(e,['exerciseId','sets','reps','restSeconds','rir','reason','evidence','ruleId',...(canonical?['alternatives']:[])],ef);
+    const item=methodology.exercises.find(x=>x?.id===e.exerciseId&&x.status==='approved');
+    if(!item||!Array.isArray(item.environments)||!item.environments.some(v=>c.facts.environment.includes(v)))reject(400,'Exercício não aprovado ou incompatível com o ambiente informado.',ef+'.exerciseId','approved-context-exercise');
+    for(const [key,min,max] of [['sets',1,10],['reps',1,50],['restSeconds',0,600],['rir',0,10]])if(!Number.isInteger(e[key])||e[key]<min||e[key]>max)reject(400,'Parâmetros de exercício inválidos.',ef+'.'+key,'dose-range');
+    if(!Array.isArray(e.evidence)||e.evidence.length<1||e.evidence.length>5||e.evidence.some(k=>typeof k!=='string'||!Object.hasOwn(c.facts,k)))reject(400,'Justifique cada exercício com evidências e referência disponíveis.',ef+'.evidence','fact-evidence');
+    const rule=methodology.rules.find(r=>r?.id===e.ruleId);if(!rule)reject(400,'Justifique cada exercício com evidências e referência disponíveis.',ef+'.ruleId','method-rule');
+    const source=methodology.sources?.find(s=>s?.id===rule.sourceId);if(canonical&&(!source||! /^[a-f0-9]{64}$/.test(source.sha256)||!source.version||!rule.section))reject(400,'Source provenance unavailable',ef+'.ruleId','source-provenance');
+    const reference=source?{ruleId:rule.id,sourceId:source.id,sourceVersion:source.version,sourceSha256:source.sha256,section:rule.section}:undefined;
+    let alternatives;if(canonical){if(!Array.isArray(e.alternatives)||e.alternatives.length>4)reject(400,'Alternatives require distinct catalog IDs',ef+'.alternatives','alternative-count');
+     const alternativeIds=new Set();alternatives=e.alternatives.map((a,k)=>{const af=ef+'.alternatives['+k+']';shape(a,['exerciseId','reason','evidence','ruleId'],af);
+      if(alternativeIds.has(a.exerciseId))reject(400,'Alternatives require distinct catalog IDs',af+'.exerciseId','unique-alternative');alternativeIds.add(a.exerciseId);
+      const alternative=methodology.exercises.find(x=>x?.id===a.exerciseId&&x.status==='approved');
+      if(!alternative||a.exerciseId===e.exerciseId||!item.allowedAlternativeIds?.includes(a.exerciseId)||!Array.isArray(alternative.environments)||!alternative.environments.some(v=>c.facts.environment.includes(v)))reject(400,'Alternative is not explicitly reviewed for this exercise and context',af+'.exerciseId','approved-context-alternative');
+      if(a.ruleId!==e.ruleId)reject(400,'Alternative is not explicitly reviewed for this exercise and context',af+'.ruleId','alternative-rule');
+      if(!Array.isArray(a.evidence)||!a.evidence.length||a.evidence.length>5||a.evidence.some(k=>typeof k!=='string'||!Object.hasOwn(c.facts,k)))reject(400,'Alternative is not explicitly reviewed for this exercise and context',af+'.evidence','fact-evidence');
+      return {...a,name:label(alternative.name,2,100,af+'.catalogName'),reason:label(a.reason,8,500,af+'.reason'),reference};
+     });
+    }
+    return {...e,name:label(item.name,2,100,ef+'.catalogName'),reason:label(e.reason,8,500,ef+'.reason'),...(reference?{reference}:{}),...(canonical?{alternatives}: {})};
    });return {...s,exercises};
   });return {title:payload.title.trim(),daysPerWeek:payload.daysPerWeek,sessions:output,exercises:output.flatMap(s=>s.exercises),canonical};
  }
