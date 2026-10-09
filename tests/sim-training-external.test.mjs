@@ -85,3 +85,26 @@ test('fresh application flow recovers prepared proposal from durable journal, sa
   const key=randomUUID(),saved=await f.confirm(p,p.payload,key);assert.equal(saved.status,201);assert.equal(saved.data.plan.status,'draft');assert.deepEqual((await f.confirm(p,p.payload,key)).data,saved.data);assert.equal((await f.confirm(p)).status,409);assert.equal(f.calls(),1);
  }finally{await fresh?.close();await f.close();}
 });
+
+
+test('request session revoked or expired while reservation awaits its transaction sends nothing and creates no spend',async()=>{
+ for(const mode of ['revoked','expired','gate-expired']){
+  const f=await externalFixture();let fresh,release;try{await f.externalConsent();
+   const adapter=asyncLocalStore(f.store),transaction=adapter.transaction;let signal;const waiting=new Promise(r=>{signal=r;});let armed=true;
+   adapter.transaction=async work=>{if(armed){armed=false;signal();await new Promise(r=>{release=r;});}return transaction(work);};
+   fresh=await createLocalService({store:adapter,trainingProposals:f.config,loginLimit:80});f.app.server.removeAllListeners('request');f.app.server.on('request',fresh);
+   const pending=f.prepare();await waiting;
+   if(mode==='gate-expired')f.config.expiresAt=Date.now()-1;else if(mode==='revoked')f.store.run('DELETE FROM sessions WHERE user_id=?',f.ids.coach);else f.store.run('UPDATE sessions SET expires_at=? WHERE user_id=?',Date.now()-1,f.ids.coach);
+   release();assert.equal((await pending).status,mode==='gate-expired'?503:401,mode);assert.equal(f.calls(),0,mode);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM ai_monthly_reservations').n,0,mode);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM operations WHERE operation_key LIKE ?', 'training-external-job-%').n,0,mode);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM plans').n,0,mode);
+  }finally{release?.();await fresh?.close();await f.close();}
+ }
+});
+
+
+test('capabilities do not expose private catalog to coach from another organization',async()=>{
+ const f=await externalFixture();try{await f.coach.login('outsider');const cap=(await f.coach.req('training-proposals/capabilities')).data;assert.equal(cap.available,false);assert.equal(cap.exerciseOptions,undefined);assert.equal(cap.methodStatus,'unavailable');for(const e of f.config.methodology.exercises){assert.ok(!JSON.stringify(cap).includes(e.id));assert.ok(!JSON.stringify(cap).includes(e.name));}}finally{await f.close();}
+});
+
+test('current professional allow-with-limitations is insufficient for external generation until structured restrictions exist',async()=>{
+ const f=await externalFixture();try{f.store.run('UPDATE anamneses SET attention_review=1 WHERE student_id=?',f.ids.studentRecord);await f.externalConsent();const risk=(await f.coach.req(f.base+'/training-risk')).data.risk;assert.equal((await f.coach.req(f.base+'/training-risk',{sequence:risk.sequence||0,anamnesisRevision:1,decision:'allow-with-limitations',note:'Private offline limitation: avoid a specific movement.',confirmed:true},'PUT')).status,200);assert.equal((await f.coach.req(f.base+'/training-risk')).data.risk.resolved,true);assert.equal((await f.prepare()).status,409);assert.equal(f.calls(),0);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM ai_monthly_reservations').n,0);}finally{await f.close();}
+});
