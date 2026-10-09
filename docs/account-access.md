@@ -6,6 +6,8 @@ Com transporte habilitado, confirmar o cadastro administrativo enfileira automat
 
 **Esqueci minha senha** recupera uma conta existente, preserva papel e autorização e revoga todas as sessões antigas. Não concede acesso pago. Links aleatórios de 256 bits expiram em 15 minutos e são consumidos atomicamente uma única vez; mudanças de autorização invalidam links anteriores. Senhas de 14–128 caracteres usam scrypt. Limites persistentes por IP/e-mail e validação de origem incluem destinatários ausentes.
 
+Login confere novamente a senha persistida sob o mesmo lock de usuário usado pelo reset antes de criar a sessão. Um login em voo com a senha anterior falha se o reset já foi concluído; se a sessão nasceu antes, o reset a revoga. Cadastro, mudança de autorização, pedido, despacho e consumo de links serializam a elegibilidade por e-mail normalizado. A resolução única entre organizações é revalidada tanto no despacho quanto no consumo: um destinatário que se tornou ambíguo não pode ativar o vínculo pelo link anterior.
+
 ## Transporte pendente
 
 ### Contrato exato de ambiente SMTP

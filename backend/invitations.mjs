@@ -9,10 +9,11 @@ export function invitationFlow({store,now,audit,deny,exact,email,text,read,mutat
     if(typeof body.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(body.token)||typeof body.password!=='string'||body.password.length<14||body.password.length>128)deny(400,'Código e senha de 14–128 caracteres obrigatórios.');
     const digest=tokenHash(body.token),password=await hashPassword(body.password);
     await store.transaction(async()=>{
+      const snapshot=await store.get('SELECT created_by FROM invitations WHERE token_hash=? AND email=? AND consumed_at IS NULL AND expires_at>?',digest,address,now());if(!snapshot)deny(400,'Convite indisponivel.');await store.lockActor(snapshot.created_by);await store.lockEmail(address);
       const invite=await store.get('UPDATE invitations SET consumed_at=? WHERE token_hash=? AND email=? AND consumed_at IS NULL AND expires_at>? RETURNING *',now(),digest,address,now());
       if(!invite)deny(400,'Convite inválido, expirado ou já utilizado.');
       const issuer=await store.get("SELECT id FROM users WHERE id=? AND org_id=? AND role='admin' AND active=1",invite.created_by,invite.org_id);if(!issuer)deny(400,'Convite indisponível.');
-      if(invite.role==='student'){const row=await store.get('SELECT * FROM students WHERE id=? AND org_id=?',invite.student_id,invite.org_id);if(!row)deny(400,'Convite indisponível.');await canActivate(row);}
+      if(invite.role==='student'){await store.lockStudent(invite.student_id);const row=await store.get('SELECT * FROM students WHERE id=? AND org_id=?',invite.student_id,invite.org_id);if(!row)deny(400,'Convite indisponível.');await canActivate(row);}
       if(await store.get('SELECT id FROM users WHERE email=?',address))deny(409,'Destinatário já possui acesso.');
       const id=randomUUID();await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,invite.org_id,address,invite.name,invite.role,password);
       if(invite.role==='student'){const updated=await store.run('UPDATE students SET user_id=?,revision=revision+1 WHERE id=? AND org_id=? AND email=? AND user_id IS NULL',id,invite.student_id,invite.org_id,address);if(updated.changes!==1)deny(409,'Vínculo de aluno indisponível.');}
@@ -31,8 +32,8 @@ export function invitationFlow({store,now,audit,deny,exact,email,text,read,mutat
     else deny(400,'Tipo de convite inválido.');
     let token=null;
     const result=await mutation(actor,req,body,async()=>{
-      // Serialize issuance across administrators of the same organization.
-      await store.run('UPDATE organizations SET name=name WHERE id=?',actor.org_id);
+      // Lock order: actor (mutation), normalized email, organization, student.
+      await store.lockEmail(address);await store.run('UPDATE organizations SET name=name WHERE id=?',actor.org_id);
       if(await store.get('SELECT id FROM users WHERE email=?',address))deny(409,'Destinatário já possui acesso.');
       if(row){const current=await student(actor,row.id);if(current.user_id||current.email!==address)deny(409,'Cadastro mudou. Recarregue.');}
       await store.run('UPDATE invitations SET consumed_at=? WHERE org_id=? AND email=? AND consumed_at IS NULL',now(),actor.org_id,address);

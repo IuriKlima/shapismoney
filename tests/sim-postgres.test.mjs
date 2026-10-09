@@ -20,6 +20,23 @@ async function embedded(){
   return {db,store:postgresStore(pool)};
 }
 
+test('reset racing an old-password login cannot create a post-reset authenticated session', {timeout:20000}, async()=>{
+ const {store}=await embedded();await migratePostgres(store);const org=randomUUID(),user=randomUUID(),messages=[],oldHash=await hashPassword(FIXTURE_PASSWORD),address='reset-race@fixture.invalid';
+ await store.run('INSERT INTO organizations VALUES (?,?)',org,'Synthetic reset race');await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',user,org,address,'Synthetic admin','admin',oldHash);
+ const app=await createLocalServer({store,loginLimit:30,accessEmail:{enabled:true,reviewed:true,publicOrigin:'https://shape.example.test',autoDispatch:false,minimumResponseMs:0,transport:{kind:'mock',send:async m=>{messages.push(m);return {accepted:true};}}}});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+app.server.address().port;
+ const req=async(route,body)=>{const r=await fetch(origin+'/api/local/'+route,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify(body)});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')};};
+ let release;const gate=new Promise(r=>{release=r;});let notify;const captured=new Promise(r=>{notify=r;});const get=store.get;let pause=true;
+ try{
+  await req('password-access/reset/request',{email:address});await app.flushAccessEmail();const token=/#password=([A-Za-z0-9_-]{43})/.exec(messages[0].text)[1];
+  // Hold an already-read password snapshot outside the adapter's transaction queue.
+  store.get=async(sql,...args)=>{const row=await get(sql,...args);if(pause&&sql==='SELECT * FROM users WHERE email=? AND active=1'&&args[0]===address){pause=false;notify();await gate;}return row;};
+  const pending=req('login',{email:address,password:FIXTURE_PASSWORD});await captured;
+  assert.equal((await req('password-access/confirm',{email:address,token,password:'Synthetic-replacement-password-2026!'})).status,200);release();const stale=await pending;
+  assert.equal(stale.status,401);assert.equal(stale.cookie,null);assert.equal((await get('SELECT COUNT(*)::integer AS n FROM sessions WHERE user_id=?',user)).n,0);
+  assert.equal((await req('login',{email:address,password:'Synthetic-replacement-password-2026!'})).status,200);assert.equal((await get('SELECT COUNT(*)::integer AS n FROM sessions WHERE user_id=?',user)).n,1);
+ }finally{release();store.get=get;await app.close();}
+});
+
 test('PostgreSQL limited role supports manual grant and mailbox signup with atomic token consumption without DDL',async()=>{
  const {db,store}=await embedded();await migratePostgres(store);const org=randomUUID(),admin=randomUUID(),messages=[],password=await hashPassword(FIXTURE_PASSWORD);
  await store.run('INSERT INTO organizations VALUES (?,?)',org,'Synthetic access PG');await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',admin,org,'admin-access@fixture.invalid','Synthetic admin','admin',password);await db.exec('SET ROLE sim_app');
