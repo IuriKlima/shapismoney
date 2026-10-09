@@ -27,3 +27,5 @@
 !public/sim/manual-training-ui.js
 
 !public/sim/access-ui.js
+
+!public/sim/training-session-editor.js
