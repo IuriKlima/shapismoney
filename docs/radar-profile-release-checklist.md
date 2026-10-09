@@ -4,7 +4,7 @@ Estado em 09/10/2026: candidato local validado, ainda sem autorização de publi
 
 ## Verificado neste Windows
 
-- [x] 218/218 testes, zero falhas, exit 0, suíte serial final em cerca de 222 segundos.
+- [x] 219/219 testes, zero falhas, exit 0, suíte serial após correção do lock em cerca de 204 segundos, com backend instalado limpo. A rodada anterior do candidato ad276ca tinha 218/218.
 - [x] Build, lint e typecheck; rotas públicas `/`, `/radar`, `/vendas`, `/privacidade` e área privada existente `/local`.
 - [x] Chrome isolado em 1440px, 390px e 320px: sem overflow, Radar voltar/cancelar/sair/repetir, resultado com empates, interesse nos planos, CRM administrativo, perfil cancelar/salvar/recarregar/foto/sair; reduced-motion conferido.
 - [x] Perfil editável somente pelo aluno dono; leitura privada segue organização/vínculo; conflitos de revisão e repetição idempotente. Upload com limite de 2 MB, assinatura de JPEG/PNG/WebP, 16 MP, sem animação/SVG; WebP sanitizado e metadados removidos.
@@ -16,7 +16,7 @@ Estado em 09/10/2026: candidato local validado, ainda sem autorização de publi
 
 ## Bloqueios antes de publicar
 
-- [ ] Foto real de Bruno: receber o caminho local autorizado, ver os pixels, preservar original, otimizar e revisar cortes desktop/390/320. As transferências Library de fotos deram 403 e foram interrompidas; não repetir nem contornar. A captura atual está explicitamente sem foto.
+- [ ] Foto real de Bruno: receber o caminho local autorizado, ver os pixels, preservar original, otimizar e revisar cortes desktop/390/320. As tentativas anteriores deram 403. Uma nova tentativa única, explicitamente autorizada para `C:\Users\andre\Documents\Brunão\fotos-bruno`, chegou à aplicação de metadados mas falhou com `AttributeError: module 'os' has no attribute 'setxattr'`. A pasta foi criada e continua sem arquivos materializados; as outras quatro transferências não foram executadas. Não houve contorno nem alteração do helper oficial. A captura atual está explicitamente sem foto.
 - [ ] Aprovação editorial da regra `SIM_RADAR_SELF_REPORT_V1`, baseada no código fornecido de 15 perguntas; não afirmar reprodução exata das etapas não observadas da versão pública atual. Resultado orientativo por regras locais, sem diagnóstico ou validação científica.
 - [ ] Responsável confirmar retenção/remoção dos contatos e fotos, canal de privacidade e texto de uso. E-mail/WhatsApp declarados ainda não são verificados: o formulário não prova a identidade nem legitima campanha automática.
 - [ ] Confirmar organização de destino existente e autorizada. Definir `SIM_RADAR_ORG_ID` apenas na configuração operacional segura; ausência ou organização inválida retorna 503. Não escolher tenant por inferência ou configurar credenciais aqui.
@@ -43,4 +43,14 @@ Detalhamento operacional: [radar-profile-rollout.md](radar-profile-rollout.md). 
 
 Servidor local de QA: `http://127.0.0.1:5191`, somente fixtures sintéticas e adaptadores externos desativados. Evidências privadas em `.qa/full-tests-serial.log`, `.qa/screenshots/` e roteiros Chrome; não incluídas no contexto da imagem.
 
-A captura `shape-is-money-vendas-revisao-sem-foto.png` foi salva na Library, ID `libfile_5220ec715a808191a7212ba8bb2acabd`, versão 0. Ela mostra a LP sem foto de Bruno e sem alunos reais. A identidade exata foi preservada num arquivo privado de metadados local; o helper oficial não pôde aplicar atributos estendidos neste Windows. Não houve nova transferência das fotos nem alteração do helper.
+A captura `shape-is-money-vendas-revisao-sem-foto.png` foi salva na Library, ID `libfile_5220ec715a808191a7212ba8bb2acabd`, versão 0. Ela mostra a LP sem foto de Bruno e sem alunos reais. A identidade exata foi preservada num arquivo privado de metadados local; o helper oficial não pôde aplicar atributos estendidos neste Windows. A tentativa posterior das fotos e seu bloqueio estão descritos acima; a LP continua sem foto.
+
+## Correção do lock após QA do candidato ad276ca
+
+O QA reportou `npm ci --omit=dev --ignore-scripts --no-audit --no-fund` com EUSAGE no build Docker do commit `ad276ca30b4def6fb0ef3b1591e98c37f710b962`. A mesma falha foi reproduzida localmente, com Node 24.19.0 e npm 11.6.2 em diretório isolado: `Invalid: lock file's @emnapi/runtime@1.10.0 does not satisfy @emnapi/runtime@1.11.3`. O npm foi obtido do registry oficial e seu SHA512 conferido; não foi instalado no sistema. Configurações de usuário/global vazias, cache e diretórios isolados evitaram leitura do `.npmrc`, uso de credenciais ou alteração das dependências do checkout original.
+
+A causa foi a resolução de dependências ao copiar a cadeia do Sharp para o lock do backend: os dois pacotes WASM opcionais exigem `@emnapi/runtime ^1.11.3`, enquanto o registro compartilhado era `1.10.0`. O lock principal já possui os dois registros aninhados em `1.11.3` e permanece inalterado. A correção muda somente versão, URL pública e integridade do registro no lock do backend, usando metadados idênticos aos desses registros existentes. Sharp continua em 0.35.4; pg, nodemailer, manifests e todas as outras versões permanecem iguais.
+
+`npm ci` limpo do backend passou no Windows e também com seleção explícita `--os=linux --cpu=x64 --libc=glibc`; nenhum dos dois alterou o lock. A segunda instalação contém Sharp/libvips Linux x64 (glibc e musl) e não o binário Windows. Isso verifica resolução e seleção de pacotes em um host Windows, não execução nativa Linux. Smoke nativo Windows da instalação nova conferiu Sharp 0.35.4, libvips 8.18.6, conversão WebP e remoção de EXIF/ICC. O grafo do lock principal passou em `npm ci --include=dev --dry-run`, sem modificar seu arquivo.
+
+O teste `tests/sim-backend-lock.test.mjs` confere resolução e compatibilidade de todas as dependências obrigatórias/opcionais do backend, inclusive os caminhos WASM de plataformas que não são o host atual. Build, lint, typecheck e 219/219 testes passaram com o backend apontando temporariamente para a instalação limpa; o vínculo anterior foi restaurado ao fim da suíte e os módulos originais não foram alterados. As dependências de frontend permanecem no vínculo de leitura anterior, e o grafo do seu lock foi validado pelo dry-run isolado. Evidências privadas em `.qa/npm-ci-backend-before/`, `.qa/npm-ci-backend-after/`, `.qa/npm-ci-backend-linux-after/`, `.qa/clean-sharp-smoke.json` e `.qa/lock-validation-*.log`. O build Docker e a execução nativa Linux devem ser repetidos pelo QA no novo SHA; nenhuma imagem Linux/Sharp é declarada aprovada aqui.
