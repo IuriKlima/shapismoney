@@ -1,0 +1,12 @@
+import {nutritionProposalSchema,validateSchema,responsesProposalAdapter} from './proposal-responses.mjs';
+import {nutritionTotals} from './nutrition.mjs';
+import {DEMO_FOODS,DEMO_TARGETS} from './analysis-demo-data.mjs';
+export function nutritionAnalysisAdapter({enabled=false,...options}={}){const provider=responsesProposalAdapter(options);return {kind:provider.kind,transportKind:provider.transportKind,realGate:false,available:enabled===true&&provider.transportKind==='fake-test',async generate(input){if(enabled!==true||provider.transportKind!=='fake-test')throw Error('Real nutrition draft gate closed');return provider.generate(input);}};}
+export function validateDemoNutrition(payload,facts,choices=[]){
+ const schema=structuredClone(nutritionProposalSchema),item=schema.properties.meals.items.properties.items.items.properties;
+ item.foodId={type:'string',enum:DEMO_FOODS.map(f=>f.id)};item.alternatives.items.properties.foodId={...item.foodId};schema.properties.evidence.items={type:'string',enum:Object.keys(facts)};schema.properties.ruleId={type:'string',enum:['fixture-nutrition-rule']};validateSchema(payload,schema);
+ const portion=p=>{const food=DEMO_FOODS.find(f=>f.id===p.foodId);if(!food||food.preparation!==p.preparation||Math.abs(p.grams*10-Math.round(p.grams*10))>1e-7||[...food.allergens,...food.mayContain].some(a=>facts.allergies?.includes(a)))throw Error('Synthetic food, preparation, precision or allergy rejected');return {...food,gramsTenths:Math.round(p.grams*10),provenance:{source:'Composição artificial',reference:'Demonstração técnica',version:'fixture-food-v1'},alternatives:[]};};
+ const meals=payload.meals.map(m=>({name:m.name,items:m.items.map(i=>({...portion(i),alternatives:i.alternatives.map(portion)}))}));
+ if(!Array.isArray(choices)||choices.length>36)throw Error('Invalid choices');const seen=new Set();for(const c of choices){if(!c||Object.keys(c).sort().join()!=='itemIndex,mealIndex,optionIndex'||![c.mealIndex,c.itemIndex,c.optionIndex].every(v=>Number.isInteger(v)&&v>=0))throw Error('Invalid choices');const id=c.mealIndex+':'+c.itemIndex;if(seen.has(id)||!meals[c.mealIndex]?.items[c.itemIndex]||c.optionIndex>meals[c.mealIndex].items[c.itemIndex].alternatives.length)throw Error('Invalid choices');seen.add(id);}
+ const totals=nutritionTotals(meals,choices);return {meals,choices,totals,targets:DEMO_TARGETS,differences:Object.fromEntries(['energyKcal','proteinG','carbsG','fatG'].map(k=>[k,Math.round((totals[k]-DEMO_TARGETS[k])*1000)/1000])),syntheticOnly:true,clinicalApproval:false};
+}

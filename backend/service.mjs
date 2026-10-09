@@ -1,3 +1,5 @@
+import {trainingVideoFlow} from './training-videos.mjs';
+import {nutritionProposalFlow} from './nutrition-proposals.mjs';
 import {accessPolicy} from './access-policy.mjs';
 import {passwordAccessFlow} from './password-access.mjs';
 import {manualTrainingFlow,publicTrainingContent} from './manual-training.mjs';
@@ -21,7 +23,7 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:publicTrainingContent(JSON.parse(p.content)),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},accessEmail={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={}}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
   const access=accessPolicy({store,now,deny,audit});
@@ -86,8 +88,10 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const trainingSafetyFlow=trainingSafety({store,now,deny,exact,text,read,mutation,student,audit,externalEnabled:()=>!security.production&&trainingProposals.enabled===true&&trainingProposals.externalGate===true&&trainingProposals.mode==='external-reviewed'});
   const trainingProposal=trainingProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,safety:trainingSafetyFlow,security,configuration:trainingProposals,budgetConfiguration:trainingProposals.mode==='external-reviewed'?trainingProposals.budget||{}:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
-  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit});
+  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit,proposalGuard:(actor,plan)=>nutritionProposal.assertPlanApproval(actor,plan)});
+  const nutritionProposal=nutritionProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,security,nutrition,assertNutritionAccess:row=>access.assertActive(row,'nutrition'),configuration:nutritionProposals});
   const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
+  const videoFlow=trainingVideoFlow({store,now,deny,student,access,security,configuration:trainingVideos});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate:async row=>{await access.assertActive(row);}});
   const handle=async function handle(req,res){
@@ -112,6 +116,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const passwordResult=await passwordAccess.handlePublic(req,connection,route);if(passwordResult){if(passwordResult.clearSession)res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(passwordResult.status,passwordResult.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      if(await videoFlow.handle(actor,req,res,route))return;
       const accessResult=await passwordAccess.handle(actor,req,route);if(accessResult)return send(accessResult.status,accessResult.data);
       const manualResult=await manualTraining.handle(actor,req,route);if(manualResult){if(manualResult.binary){res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename="'+manualResult.filename+'"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"sandbox; default-src 'none'"});return res.end(manualResult.binary);}return send(manualResult.status,manualResult.data);}
       const safetyResult=await trainingSafetyFlow.handle(actor,req,route);if(safetyResult)return send(safetyResult.status,safetyResult.data);
@@ -127,6 +132,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/logout'&&req.method==='POST'){
         const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);trainingProposal.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
       }
+      const nutritionProposalResult=await nutritionProposal.handle(actor,auth,req,route);if(nutritionProposalResult)return send(nutritionProposalResult.status,nutritionProposalResult.data);
       const nutritionResult=await nutrition.handle(actor,req,route);if(nutritionResult)return send(nutritionResult.status,nutritionResult.data);
       const executionResult=await execution.handle(actor,req,route);if(executionResult)return send(executionResult.status,executionResult.data);
       if(route==='/api/local/invitations'&&req.method==='POST'){const result=await invites.create(actor,req);return send(result.status,result.data);}
@@ -178,7 +184,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
           else if(action==='publish'){if(!current.approved_by||current.approved_revision!==current.revision-1)deny(409,'Aprovação desatualizada.');updated=await store.run("UPDATE plans SET status='published',published_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=?",now(),plan.id,body.revision,required);}
           else updated=await store.run("UPDATE plans SET status='review',revision=revision+1 WHERE id=? AND revision=? AND status=?",plan.id,body.revision,required);
           if(updated.changes!==1)deny(409,'Plano mudou. Recarregue.');
-          await audit(actor,row.id,'plan.'+action);return {status:200,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',plan.id))}};});return send(result.status,result.data);
+          if(action==='publish')await videoFlow.snapshot(actor,current,row);
+            await audit(actor,row.id,'plan.'+action);return {status:200,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',plan.id))}};});return send(result.status,result.data);
       }
       if(route==='/api/local/audit'&&req.method==='GET'){
         if(actor.role==='student')deny(403,'Auditoria restrita à equipe.');const ids=(await list(actor)).map(s=>s.id);const rows=(await store.all('SELECT id,actor_id,student_id,event,created_at FROM audit WHERE org_id=? ORDER BY created_at DESC LIMIT 100',actor.org_id)).filter(a=>actor.role==='admin'||a.actor_id===actor.id||ids.includes(a.student_id));return send(200,{audit:rows});

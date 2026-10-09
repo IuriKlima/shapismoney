@@ -1,0 +1,23 @@
+import {createHash} from 'node:crypto';
+import {readFileSync,realpathSync,statSync,createReadStream} from 'node:fs';
+import path from 'node:path';
+// Programmatic opt-in only. A reviewed association is independent of exercise prescription.
+export function trainingVideoFlow({store,now,deny,student,access,security,configuration={}}){
+ const enabled=()=>!security.production&&configuration.enabled===true&&configuration.expiresAt>now()&&configuration.expiresAt-now()<=86400000;
+ const sha=value=>createHash('sha256').update(value).digest('hex');
+ function media(id){const item=configuration.media?.find(v=>v.id===id);if(!item||! /^[a-f0-9-]{36}$/.test(id)||! /^[a-f0-9]{64}$/.test(item.sha256)||typeof item.filename!=='string'||path.basename(item.filename)!==item.filename||!item.filename.endsWith('.mp4'))return null;
+  try{const root=realpathSync(configuration.directory),filename=realpathSync(path.join(root,item.filename)),stat=statSync(filename);if(!filename.startsWith(root+path.sep)||!stat.isFile()||stat.size<1||stat.size>50000000||sha(readFileSync(filename))!==item.sha256)return null;return {...item,filename,size:stat.size};}catch{return null;}
+ }
+ async function snapshot(actor,plan,row){if(!enabled())return;const content=JSON.parse(plan.content),ids=new Set((content.exercises||[]).map(e=>e.exerciseId));const associations=[];
+  for(const a of configuration.associations||[]){if(a.orgId!==row.org_id||a.reviewedBy!==row.coach_id||a.approved!==true||!a.reviewedAt||a.reviewedAt>now()||!ids.has(a.exerciseId))continue;const reviewer=await store.get("SELECT id FROM users WHERE id=? AND org_id=? AND role='coach' AND active=1",a.reviewedBy,row.org_id),m=media(a.videoId);if(!reviewer||!m)continue;associations.push({exerciseId:a.exerciseId,videoId:m.id,sha256:m.sha256,reviewedBy:a.reviewedBy,reviewedAt:a.reviewedAt,fixtureOnly:configuration.fixtureOnly===true});}
+  const result={marker:'training-video-snapshot-v1',planId:plan.id,studentId:row.id,orgId:row.org_id,associations,at:now()};await store.run('INSERT INTO operations VALUES (?,?,?,?,?)',actor.id,'training-videos-'+plan.id,sha(JSON.stringify(result)),200,JSON.stringify(result));
+ }
+ async function handle(actor,req,res,route){const match=/^\/api\/local\/plans\/([a-f0-9-]{36})\/videos(?:\/([a-f0-9-]{36}))?$/.exec(route);if(!match)return false;if(req.method!=='GET')deny(405,'Use consulta de vídeo.');if(!['student','coach','admin'].includes(actor.role))deny(403,'Vídeos exigem acesso ao treino.');const plan=await store.get('SELECT * FROM plans WHERE id=?',match[1]);if(!plan)deny(404,'Treino não encontrado.');const row=await student(actor,plan.student_id);if(actor.role==='student'){await access.assertActive(row,'training');if(plan.status!=='published')deny(404,'Treino não publicado.');}
+  const saved=await store.get('SELECT result FROM operations WHERE operation_key=?','training-videos-'+plan.id);let data;try{data=JSON.parse(saved?.result||'null');}catch{data=null;}const valid=data?.marker==='training-video-snapshot-v1'&&data.orgId===actor.org_id&&data.studentId===row.id&&data.planId===plan.id;
+  const available=enabled()&&valid;const associations=available?data.associations:[];
+  if(!match[2]){res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({available,associations:associations.map(a=>({...a,url:'/api/local/plans/'+plan.id+'/videos/'+a.videoId})),notice:configuration.fixtureOnly===true?'ASSOCIAÇÕES FICTÍCIAS DE TESTE — validação técnica, sem aprovação real de Bruno.':'Somente associações explicitamente conferidas; catálogo de vídeos desligado por padrão.'}));return true;}
+  const association=associations.find(a=>a.videoId===match[2]),m=association&&media(match[2]);if(!m||m.sha256!==association.sha256)deny(404,'Vídeo não autorizado para este treino.');let start=0,end=m.size-1,status=200;const range=req.headers.range;if(range){const parsed=/^bytes=(\d+)-(\d*)$/.exec(range);if(!parsed){res.writeHead(416,{'Content-Range':'bytes */'+m.size});res.end();return true;}start=Number(parsed[1]);end=parsed[2]?Number(parsed[2]):end;if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>end||end>=m.size){res.writeHead(416,{'Content-Range':'bytes */'+m.size});res.end();return true;}status=206;}
+  res.writeHead(status,{'Content-Type':'video/mp4','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'no-store',...(status===206?{'Content-Range':'bytes '+start+'-'+end+'/'+m.size}:{})});const stream=createReadStream(m.filename,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return true;
+ }
+ return {snapshot,handle};
+}
