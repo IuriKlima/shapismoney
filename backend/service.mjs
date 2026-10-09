@@ -91,7 +91,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit,proposalGuard:(actor,plan)=>nutritionProposal.assertPlanApproval(actor,plan)});
   const nutritionProposal=nutritionProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,security,nutrition,assertNutritionAccess:row=>access.assertActive(row,'nutrition'),configuration:nutritionProposals});
   const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
-  const videoFlow=trainingVideoFlow({store,now,deny,student,access,security,configuration:trainingVideos});
+  const videoFlow=trainingVideoFlow({store,now,deny,student,access,security,configuration:trainingVideos,methodology:trainingProposals.methodology,exact,text,read,mutation,audit});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate:async row=>{await access.assertActive(row);}});
   const handle=async function handle(req,res){
@@ -116,6 +116,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const passwordResult=await passwordAccess.handlePublic(req,connection,route);if(passwordResult){if(passwordResult.clearSession)res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(passwordResult.status,passwordResult.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const videoReview=await videoFlow.editor(actor,req,route);if(videoReview)return send(videoReview.status,videoReview.data);
       if(await videoFlow.handle(actor,req,res,route))return;
       const accessResult=await passwordAccess.handle(actor,req,route);if(accessResult)return send(accessResult.status,accessResult.data);
       const manualResult=await manualTraining.handle(actor,req,route);if(manualResult){if(manualResult.binary){res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename="'+manualResult.filename+'"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"sandbox; default-src 'none'"});return res.end(manualResult.binary);}return send(manualResult.status,manualResult.data);}

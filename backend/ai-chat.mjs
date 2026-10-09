@@ -71,7 +71,7 @@ export function aiChatFlow({store,now,deny,exact,text,read,mutation,student,audi
       if(body.studentId!==null&&(typeof body.studentId!=='string'||! /^[a-f0-9-]{36}$/.test(body.studentId)))deny(400,'Aluno inválido.');
       let id=body.studentId;if(actor.role==='student'){const own=await store.get('SELECT id FROM students WHERE user_id=? AND org_id=?',actor.id,actor.org_id);if(!own)deny(404,'Vínculo de aluno pendente.');if(id!==null&&id!==own.id)deny(404,'Aluno não encontrado.');id=own.id;}else if(id)await student(actor,id);
       if(sessions.size>=1000||[...sessions.values()].filter(s=>s.actorId===actor.id).length>=8)deny(429,'Limite de conversas abertas. Aguarde sua expiração.');
-      const s={id:randomUUID(),actorId:actor.id,orgId:actor.org_id,role:actor.role,authHash:auth.hash,studentId:id,messages:[],proposal:null,expiresAt:now()+ttl,busy:false};sessions.set(s.id,s);await audit(actor,id,'ai.provider-consent');return {status:201,data:{sessionId:s.id,expiresAt:s.expiresAt,retention:'memory-20-minutes'}};
+      const s={id:randomUUID(),actorId:actor.id,orgId:actor.org_id,role:actor.role,authHash:auth.hash,studentId:id,messages:[],proposal:null,expiresAt:now()+ttl,busy:false};s.consentVersion='SIM_CHAT_EXTERNAL_V1';sessions.set(s.id,s);await audit(actor,id,'ai.provider-consent');await audit(actor,id,'ai.provider-consent.SIM_CHAT_EXTERNAL_V1');return {status:201,data:{sessionId:s.id,expiresAt:s.expiresAt,consentVersion:s.consentVersion,retention:'memory-20-minutes'}};
     }
     const s=owner(actor,auth,body.sessionId);
     if(route==='/api/local/ai/chat/message'){

@@ -859,3 +859,5 @@
 .training-video{width:100%;max-height:360px}#training-section figure{margin:16px 0;overflow-wrap:anywhere}
 
 .persistent-page #local-app .notice{color:#39332a}
+
+#training-video-admin-section{overflow-wrap:anywhere}#training-video-admin-section form{display:block}#training-video-admin-section :is(input,select,textarea){min-width:0;max-width:100%}#training-video-admin-section .btn{white-space:normal;max-width:100%}
