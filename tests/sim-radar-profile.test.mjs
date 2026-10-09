@@ -6,7 +6,7 @@ import {isolatedFixture,FIXTURE_PASSWORD} from './backend-fixtures.mjs';
 import {createLocalServer} from '../backend/server.mjs';
 import {QUESTIONS,RADAR_VERSION,RADAR_CONSENT,radarResult} from '../public/sim/radar-model.js';
 
-async function fixture(){const f=await isolatedFixture();const org=f.store.get('SELECT org_id FROM users WHERE id=?',f.ids.admin).org_id;const app=await createLocalServer({store:f.store,radarOrgId:org,loginLimit:50});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+app.server.address().port;
+async function fixture(options={}){const f=await isolatedFixture();const org=f.store.get('SELECT org_id FROM users WHERE id=?',f.ids.admin).org_id;const app=await createLocalServer({store:f.store,radarOrgId:org,loginLimit:50,...options});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+app.server.address().port;
   const jar=()=>{let cookie='';return async(route,body,method='POST',key=randomUUID())=>{const r=await fetch(origin+'/api/local/'+route,{method:body===undefined?'GET':method,headers:{Origin:origin,...(body!==undefined?{'Content-Type':'application/json','Idempotency-Key':key}:{}),...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];const binary=r.headers.get('content-type')==='image/webp';return {status:r.status,data:binary?Buffer.from(await r.arrayBuffer()):await r.json(),headers:r.headers};};};return {...f,app,origin,jar,close:()=>app.close()};}
 const registration={name:'Contato fictício',email:'lead@fixture.invalid',phone:'',necessary:true,marketing:false,consentVersion:RADAR_CONSENT,source:'radar'};
 const event=name=>({event:name,version:RADAR_VERSION});
@@ -32,7 +32,18 @@ test('public capture/events are idempotent and separate consent, track abandonme
     assert.equal((await coach('crm/radar')).status,403);assert.deepEqual((await outsider('crm/radar')).data.leads,[]);const crm=await admin('crm/radar');assert.equal(crm.data.leads[0].marketing,false);assert.equal(crm.data.leads[0].runs.length,2);assert.equal(crm.data.leads[0].runs[0].state,'start');assert.doesNotMatch(JSON.stringify(crm.data),/capacity_3|answers|token_hash|request_hash|discomfort/);
     await visitor('radar/register',{...registration,marketing:true,source:'plans'});assert.equal((await visitor('radar/event',event('cta'))).status,200);await visitor('radar/marketing',{enabled:false});assert.equal(f.store.get('SELECT marketing FROM radar_leads').marketing,0);
     assert.equal((await visitor('radar/event',{...event('completion'),version:'other'})).status,400);
+    const leadId=f.store.get('SELECT id FROM radar_leads').id;for(let i=0;i<55;i++)f.store.run('INSERT INTO radar_runs VALUES (?,?,?,?,?,?,?,?)',randomUUID(),leadId,'synthetic-old-hash-'+i,Date.now()+10000,'registered',RADAR_VERSION,'radar',i);
+    const bounded=(await admin('crm/radar')).data.leads[0];assert.equal(bounded.runs.length,50);assert.equal(bounded.totalRuns,58);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM radar_runs').n,58);
     for(const path of ['/','/radar','/vendas','/privacidade'])assert.equal((await fetch(f.origin+path)).status,200);
+  }finally{await f.close();}
+});
+
+test('public restart shares the hourly creation limit and cannot grow history indefinitely',async()=>{
+  let clock=Date.now();const f=await fixture({now:()=>clock}),visitor=f.jar();try{
+    assert.equal((await visitor('radar/register',registration)).status,201);
+    for(let i=0;i<29;i++)assert.equal((await visitor('radar/restart',{})).status,201);
+    assert.equal((await visitor('radar/restart',{})).status,429);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM radar_runs').n,30);
+    clock+=3600001;assert.equal((await visitor('radar/restart',{})).status,201);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM radar_runs').n,31);
   }finally{await f.close();}
 });
 test('owner profile edits preserve previous records; coach/admin cannot mutate; uploaded photo is private and sanitized',async()=>{

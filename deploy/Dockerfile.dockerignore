@@ -1,6 +1,12 @@
 **
 !backend/
-!backend/**
+!backend/*.mjs
+!backend/package.json
+!backend/package-lock.json
+!backend/migrations/
+!backend/migrations/*.sql
+!backend/pg-migrations/
+!backend/pg-migrations/*.sql
 !public/
 !public/sim/
 !public/sim/persistent.html
@@ -39,4 +45,22 @@
 !public/sim/radar-model.js
 !public/sim/profile-ui.js
 !public/sim/assets/
-!public/sim/assets/**
+!public/sim/assets/architecture.webp
+
+# Keep private/test exclusions last: later inclusions must never reopen them.
+**/node_modules
+**/node_modules/**
+**/.env*
+**/.npmrc
+**/*.sqlite*
+**/*.dump
+**/*.backup
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/secrets/**
+**/fixtures/**
+**/.qa/**
+**/tests/**
+**/.git/**

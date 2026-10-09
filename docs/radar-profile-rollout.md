@@ -14,9 +14,11 @@ Este documento prepara uma implantação futura. Não executa comandos, não con
 
 ## Antes de autorização de produção
 
+Usar também o [checklist de liberação](radar-profile-release-checklist.md). A validação local final passou 218/218 testes. O teste PGlite confirma preservação de dados sintéticos, rollback transacional e reaplicação de 008; a imagem e o PostgreSQL de staging continuam pendentes. Docker está ausente neste Windows, sem instalação nesta etapa.
+
 1. Resolver as fotos originais pelo fluxo autorizado e inspecionar os pixels; revisar texto, versão do Radar, retenção dos contatos e canal de privacidade com o responsável. Conferir preços e os termos ainda pendentes sem inventar renovação ou parcelamento.
 2. Integrar a branch em uma revisão separada, comparar o diff com a base e executar novamente a suíte no catálogo integrado. Construir e verificar a imagem Docker em ambiente disponível; Docker não foi executado neste Windows.
-3. Fixar commit e digest da imagem de oito migrações, registrar imagem anterior e sua configuração operacional, sem copiar segredos para repositório/logs. Manter Asaas e provedores externos desativados.
+3. Fixar commit e digest da imagem de oito migrações, registrar imagem anterior e sua configuração operacional, sem copiar segredos para repositório/logs. Conferir o conteúdo efetivo da imagem: fontes e ativos explícitos, sem ambiente, credenciais, banco, dumps, fixtures ou testes. A allowlist e suas exclusões finais foram conferidas por sentinelas, mas não por Docker. Testar Sharp no Linux e limites de CPU/memória/processos em staging. Manter Asaas e provedores externos desativados.
 4. Em staging isolado, restaurar um backup autorizado sem tornar dados privados públicos. Validar catálogo 001–007 e checksums antes de aplicar 008. Aplicar com papel dedicado, repetir para comprovar idempotência e conferir catálogo 001–008/checksums, DML das seis tabelas e ausência de CREATE/escrita de catálogo para `sim_app`.
 5. Conferir preservação de registros e autorizações existentes, CRM de outro tenant bloqueado, editor somente pelo aluno dono, imagem privada sem metadados, consentimentos desmarcados, ausência de respostas/score nos eventos e fluxo sem pagamento. Não criar fixtures em produção: o verificador de runtime rejeita contas `@fixture.invalid`.
 
