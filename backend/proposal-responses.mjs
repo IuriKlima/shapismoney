@@ -31,7 +31,8 @@ export const proposalInstructions=`JSON para revisão humana; nunca execute, apr
 // Tests supply a fictitious key and mock transport; there is no automatic retry.
 export function responsesProposalAdapter({apiKey,model,fetchImpl=fetch,mockOnly=false}={}){
  if(mockOnly&&fetchImpl===fetch)throw Error('Mock transport required');
- return {kind:mockOnly?'responses-mock':'responses',mockOnly,model,async generate(input,{signal}={}){
+ const fake=fetchImpl!==fetch;
+ return {kind:mockOnly?'responses-mock':fake?'responses-offline-test':'responses',mockOnly:mockOnly||fake,transportKind:fake?'fake-test':'network',model,async generate(input,{signal}={}){
   const rejected=(rule,field='$')=>{throw Object.assign(Error('Proposal output rejected'),{validationDiagnostic:{stage:'schema',field,rule}});};
   if(!apiKey||typeof model!=='string'||!model||!['training','nutrition'].includes(input.kind))throw Error('Proposal provider unavailable');
   const schema=input.kind==='training'?trainingProposalSchemaFor(input):nutritionProposalSchema;
@@ -40,6 +41,8 @@ export function responsesProposalAdapter({apiKey,model,fetchImpl=fetch,mockOnly=
   let size=0;const chunks=[];for await(const chunk of response.body){size+=chunk.length;if(size>65536)rejected('response-size');chunks.push(chunk);}
   let data;try{data=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{rejected('response-json');}
   if(data?.status!=='completed'||!Array.isArray(data.output)||data.output.length!==1||data.output[0]?.type!=='message'||data.output[0].role!=='assistant'||data.output[0].status!=='completed'||data.output[0].content?.length!==1||data.output[0].content[0]?.type!=='output_text')rejected('provider-envelope');
+  if(data.model!==undefined&&data.model!==model||!fake&&!mockOnly&&data.model!==model)rejected('provider-model');
+  if(!fake&&!mockOnly&&(!Number.isSafeInteger(data.usage?.input_tokens)||data.usage.input_tokens<0||data.usage.input_tokens>proposalInputTokenUpperBound(input)||!Number.isSafeInteger(data.usage.output_tokens)))rejected('usage-range','$.usage');
   const raw=data.output[0].content[0].text;if(typeof raw!=='string'||raw.includes(apiKey))rejected('output-text-or-secret');
   if(data.usage&&(!Number.isSafeInteger(data.usage.output_tokens)||data.usage.output_tokens<0||data.usage.output_tokens>PROPOSAL_MAX_OUTPUT_TOKENS))rejected('usage-range','$.usage');
   let value;try{value=JSON.parse(raw);}catch{rejected('output-json');}validateSchema(value,schema);return value;
@@ -54,3 +57,8 @@ export function validateSchema(value,schema,field='$'){
 }
 
 export function proposalInputTokenUpperBound(input){const schema=input.kind==='training'?trainingProposalSchemaFor(input):nutritionProposalSchema;return Buffer.byteLength(JSON.stringify({input:JSON.stringify(input),instructions:proposalInstructions,text:{format:{type:'json_schema',strict:true,schema}},max_output_tokens:PROPOSAL_MAX_OUTPUT_TOKENS,store:false}))+2048;}
+
+export function proposalFailureDiagnostic(error){
+ const d=error?.validationDiagnostic;
+ return d&&['schema','prescription'].includes(d.stage)&&typeof d.field==='string'&&d.field.length<=200&&/^\$(?:\.[a-zA-Z][a-zA-Z0-9_]*|\[\d+\])*$/.test(d.field)&&typeof d.rule==='string'&&/^[a-z][a-z0-9-]{0,79}$/.test(d.rule)?{stage:d.stage,field:d.field,rule:d.rule}:{stage:'provider',field:'$',rule:'generation-failed'};
+}

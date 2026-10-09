@@ -83,8 +83,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const intake=anamnesisFlow({store,now,deny,exact,read,mutation,student,audit,changed:(...args)=>sla.changed(...args,'anamnesis'),start:(...args)=>sla.start(...args)});
   const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit,intakeState:intake.state});
   const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
-  const trainingSafetyFlow=trainingSafety({store,now,deny,exact,text,read,mutation,student,audit});
-  const trainingProposal=trainingProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,safety:trainingSafetyFlow,security,configuration:trainingProposals,budgetConfiguration:chat});
+  const trainingSafetyFlow=trainingSafety({store,now,deny,exact,text,read,mutation,student,audit,externalEnabled:()=>!security.production&&trainingProposals.enabled===true&&trainingProposals.externalGate===true&&trainingProposals.mode==='external-reviewed'});
+  const trainingProposal=trainingProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,safety:trainingSafetyFlow,security,configuration:trainingProposals,budgetConfiguration:trainingProposals.mode==='external-reviewed'?trainingProposals.budget||{}:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
   const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit});
   const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
