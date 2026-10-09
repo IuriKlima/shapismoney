@@ -1,4 +1,6 @@
 import {trainingVideoFlow} from './training-videos.mjs';
+import {radarFlow} from './radar.mjs';
+import {profileFlow} from './profile.mjs';
 import {nutritionProposalFlow} from './nutrition-proposals.mjs';
 import {accessPolicy} from './access-policy.mjs';
 import {passwordAccessFlow} from './password-access.mjs';
@@ -23,7 +25,7 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:publicTrainingContent(JSON.parse(p.content)),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={},radarOrgId}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
   const access=accessPolicy({store,now,deny,audit});
@@ -94,12 +96,15 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const videoFlow=trainingVideoFlow({store,now,deny,student,access,security,configuration:trainingVideos,methodology:trainingProposals.methodology,exact,text,read,mutation,audit});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate:async row=>{await access.assertActive(row);}});
+  const radar=radarFlow({store,now,deny,exact,text,email,read,security,orgId:radarOrgId});
+  const profiles=profileFlow({store,deny,exact,text,read,student,mutation,audit});
   const handle=async function handle(req,res){
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
     try{
       const connection=assertRequest(req,security);
       const url=new URL(req.url,'http://127.0.0.1');const route=url.pathname;
       if(!['GET','POST','PUT'].includes(req.method))deny(405,'Método não permitido.');
+      const publicRadar=await radar.publicRoute(req,connection,route);if(publicRadar){if(publicRadar.cookie)res.setHeader('Set-Cookie',publicRadar.cookie);return send(publicRadar.status,publicRadar.data);}
       if(route==='/api/local/login'&&req.method==='POST'){
         const body=await read(req);exact(body,['email','password']);const address=email(body.email);if(typeof body.password!=='string'||body.password.length>128)deny(400,'Credenciais inválidas.');
         await store.transaction(async()=>{
@@ -116,6 +121,8 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
       const passwordResult=await passwordAccess.handlePublic(req,connection,route);if(passwordResult){if(passwordResult.clearSession)res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(passwordResult.status,passwordResult.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const profileResult=await profiles.handle(actor,req,res,route);if(profileResult){if(profileResult.binary)return;return send(profileResult.status,profileResult.data);}
+      const radarCRM=await radar.privateRoute(actor,req,route);if(radarCRM)return send(radarCRM.status,radarCRM.data);
       const videoReview=await videoFlow.editor(actor,req,route);if(videoReview)return send(videoReview.status,videoReview.data);
       if(await videoFlow.handle(actor,req,res,route))return;
       const accessResult=await passwordAccess.handle(actor,req,route);if(accessResult)return send(accessResult.status,accessResult.data);

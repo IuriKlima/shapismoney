@@ -31,3 +31,12 @@
 !public/sim/training-session-editor.js
 
 !public/sim/nutrition-proposal-ui.js
+
+!public/sim/public.html
+!public/sim/public.js
+!public/sim/public.css
+!public/sim/brand-fonts.css
+!public/sim/radar-model.js
+!public/sim/profile-ui.js
+!public/sim/assets/
+!public/sim/assets/**

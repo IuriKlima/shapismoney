@@ -20,7 +20,7 @@ export function assertRequest(req,security,{health=false}={}){
   // Only public entry documents can be reached by top-level links (e.g. Gmail).
   // Fetch Metadata never bypasses canonical host, proxy, staging or Origin checks.
   const entry=typeof req.url==='string'?req.url.split('?')[0]:'';
-  const publicNavigation=['GET','HEAD'].includes(req.method)&&['/','/local'].includes(entry)&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
+  const publicNavigation=['GET','HEAD'].includes(req.method)&&['/','/local','/radar','/vendas','/privacidade'].includes(entry)&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
   if(req.headers['sec-fetch-site']==='cross-site'&&!publicNavigation)fail('Requisição externa bloqueada.');
   let origin;
   if(security.production){

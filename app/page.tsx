@@ -1,2 +1,2 @@
-import SIMWorkspace from '../components/SIMWorkspace';
-export default function Home(){return <SIMWorkspace/>;}
+import PublicWorkspace from '../components/PublicWorkspace';
+export default function Home(){return <PublicWorkspace/>;}
