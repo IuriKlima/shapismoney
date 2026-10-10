@@ -45,7 +45,7 @@ const nutritionInstructions=proposalInstructions+' Nutrição: use apenas metas 
 
 // The adapter is real; production activation is a separate reviewed runtime gate.
 // Tests supply a fictitious key and mock transport; there is no automatic retry.
-export function responsesProposalAdapter({apiKey,model,fetchImpl=fetch,mockOnly=false}={}){
+export function responsesProposalAdapter({apiKey,model,fetchImpl=fetch,mockOnly=false,onUsage}={}){
  if(mockOnly&&fetchImpl===fetch)throw Error('Mock transport required');
  const fake=fetchImpl!==fetch;
  return {kind:mockOnly?'responses-mock':fake?'responses-offline-test':'responses',mockOnly:mockOnly||fake,transportKind:fake?'fake-test':'network',model,async generate(input,{signal}={}){
@@ -62,6 +62,7 @@ export function responsesProposalAdapter({apiKey,model,fetchImpl=fetch,mockOnly=
   if(!fake&&!mockOnly&&(!Number.isSafeInteger(data.usage?.input_tokens)||data.usage.input_tokens<0||data.usage.input_tokens>proposalInputTokenUpperBound(input)||!Number.isSafeInteger(data.usage.output_tokens)))rejected('usage-range','$.usage');
   const raw=data.output[0].content[0].text;if(typeof raw!=='string'||raw.includes(apiKey))rejected('output-text-or-secret');
   if(data.usage&&(!Number.isSafeInteger(data.usage.output_tokens)||data.usage.output_tokens<0||data.usage.output_tokens>PROPOSAL_MAX_OUTPUT_TOKENS))rejected('usage-range','$.usage');
+  if(typeof onUsage==='function'&&Number.isSafeInteger(data.usage?.input_tokens)&&Number.isSafeInteger(data.usage?.output_tokens))await onUsage({inputTokens:data.usage.input_tokens,outputTokens:data.usage.output_tokens});
   let value;try{value=JSON.parse(raw);}catch{rejected('output-json');}validateSchema(value,schema);return value;
  }};
 }

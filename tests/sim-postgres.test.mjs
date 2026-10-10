@@ -36,7 +36,7 @@ test('PostgreSQL limited 007: automatic offline draft and journal acknowledgemen
   assert.equal((await req('students/'+studentId+'/training-proposal-consent',{purpose:TRAINING_PROPOSAL_PURPOSE,sequence:0,anamnesisRevision:1,enabled:true,confirmed:true},'PUT')).status,200);
   await Promise.all([app.flushDraftJobs(),app.flushDraftJobs()]);await app.flushDraftJobs();
   const plan=await store.get('SELECT * FROM plans');assert.equal(plan.status,'draft');assert.equal(plan.approved_by,null);assert.equal(JSON.parse(plan.content).proposalSource.automaticDraft,true);
-  const journal=(await store.all('SELECT result FROM operations WHERE request_hash=?',DRAFT_JOB_MARKER)).map(r=>JSON.parse(r.result));assert.equal(journal.filter(j=>j.state==='draft-ready').length,1);assert.equal(journal.find(j=>j.state==='draft-ready').planId,plan.id);assert.equal((await store.get('SELECT COUNT(*)::integer n FROM ai_monthly_reservations')).n,1);assert.equal((await store.all('SELECT * FROM schema_migrations')).length,7);await assert.rejects(()=>store.query('CREATE TABLE forbidden_draft_jobs(id integer)'));
+  const journal=(await store.all('SELECT result FROM operations WHERE request_hash=?',DRAFT_JOB_MARKER)).map(r=>JSON.parse(r.result));assert.equal(journal.filter(j=>j.state==='draft-ready').length,1);assert.equal(journal.find(j=>j.state==='draft-ready').planId,plan.id);assert.equal((await store.get('SELECT COUNT(*)::integer n FROM ai_monthly_reservations')).n,1);assert.equal((await store.all('SELECT * FROM schema_migrations')).length,8);await assert.rejects(()=>store.query('CREATE TABLE forbidden_draft_jobs(id integer)'));
  }finally{await app.close();}
 });
 

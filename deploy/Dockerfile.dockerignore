@@ -67,3 +67,8 @@
 **/.qa/**
 **/tests/**
 **/.git/**
+!public/sim/commerce-ui.js
+# Explicit fixture-only migrations and helpers never enter the runtime image.
+backend/commerce/migrate-fixture.mjs
+backend/commerce/migrations/**
+backend/commerce/schema.sql
