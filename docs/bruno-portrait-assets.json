@@ -1,0 +1,31 @@
+{
+  "source": {
+    "filename": "Imagem do ChatGPT 9 de out. de 2026, 21_13_29.png",
+    "sha256": "c35e84cafdaa4332c9fdd2316ea12affb176187aa9ed970ba694f657199ba626",
+    "bytes": 318947,
+    "width": 667,
+    "height": 835,
+    "format": "png",
+    "provenance": "Arquivo local fornecido pelo responsável e confirmado para hero e apresentação. Original preservado fora do repositório."
+  },
+  "transform": {
+    "tool": "Sharp 0.35.4",
+    "operations": "Aplicar orientação, reduzir sem ampliar, WebP qualidade 90/effort 6, remover metadados. Sem retoque, geração de conteúdo, recorte no arquivo ou alteração da pessoa."
+  },
+  "derivatives": [
+    {
+      "path": "public/sim/assets/bruno-barbosa-667.webp",
+      "width": 667,
+      "height": 835,
+      "bytes": 34000,
+      "sha256": "a0a88aa69e01ca3b24b48e8d51892252a8ecf1a01b75ecc165459cde92baa5f4"
+    },
+    {
+      "path": "public/sim/assets/bruno-barbosa-400.webp",
+      "width": 400,
+      "height": 501,
+      "bytes": 15300,
+      "sha256": "b8d52aea1611ca95730997b8e5300eb0a070fc0e9972539fec20a256f21a357f"
+    }
+  ]
+}
