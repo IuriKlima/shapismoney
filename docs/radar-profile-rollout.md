@@ -1,6 +1,6 @@
 # Radar e perfil: plano de implantação e retorno
 
-Este documento prepara uma implantação futura. Não executa comandos, não concede autorização para produção e não contém credenciais. Nenhum push, deploy, migração de produção, cobrança, configuração de Asaas ou chamada a provedor externo foi feito nesta tarefa.
+Este documento prepara uma implantação futura. Não executa comandos, não concede autorização para produção e não contém credenciais. Nenhum deploy, migração de produção, cobrança, configuração de Asaas ou chamada a provedor externo foi feito nesta tarefa.
 
 ## Artefatos e compatibilidade
 

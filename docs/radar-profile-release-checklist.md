@@ -1,10 +1,10 @@
 # Radar e perfil: checklist de liberação
 
-Estado em 09/10/2026: candidato local validado, ainda sem autorização de publicação. Não houve push, deploy, migração de produção, uso de dados reais, configuração Asaas, cobrança ou envio de respostas a terceiros. Base publicada: `5db29b5758aadbd15d15d0d68dc6c9017961a97c`; branch: `codex/radar-premium-ux`.
+Estado em 10/10/2026: candidato local validado, ainda sem autorização de publicação. Não houve deploy, migração de produção, uso de dados reais, configuração Asaas, cobrança ou envio de respostas a terceiros. Base publicada: `5db29b5758aadbd15d15d0d68dc6c9017961a97c`; branch: `codex/radar-premium-ux`.
 
 ## Verificado neste Windows
 
-- [x] 219/219 testes, zero falhas, exit 0, suíte serial após correção do lock em cerca de 204 segundos, com backend instalado limpo. A rodada anterior do candidato ad276ca tinha 218/218.
+- [x] 219/219 testes, zero falhas, exit 0, suíte serial após integrar o retrato em cerca de 272 segundos, com backend instalado limpo. A rodada anterior do candidato ad276ca tinha 218/218.
 - [x] Build, lint e typecheck; rotas públicas `/`, `/radar`, `/vendas`, `/privacidade` e área privada existente `/local`.
 - [x] Chrome isolado em 1440px, 390px e 320px: sem overflow, Radar voltar/cancelar/sair/repetir, resultado com empates, interesse nos planos, CRM administrativo, perfil cancelar/salvar/recarregar/foto/sair; reduced-motion conferido.
 - [x] Perfil editável somente pelo aluno dono; leitura privada segue organização/vínculo; conflitos de revisão e repetição idempotente. Upload com limite de 2 MB, assinatura de JPEG/PNG/WebP, 16 MP, sem animação/SVG; WebP sanitizado e metadados removidos.
@@ -12,11 +12,11 @@ Estado em 09/10/2026: candidato local validado, ainda sem autorização de publi
 - [x] Cadastro e repetição compartilham limite de 30 requisições de criação por IP/hora. CRM retorna até 200 contatos e as últimas 50 execuções de cada contato; informa o total e preserva o histórico anterior no banco.
 - [x] Os sete SQL PostgreSQL anteriores são idênticos, por SHA256, aos do commit publicado. Teste PGlite com registros exclusivamente sintéticos preservou usuários, aluno, anamnese, plano publicado e SLA ao aplicar 008. Uma falha injetada após o DDL deixou sete migrações e nenhuma das seis tabelas novas. A aplicação bem-sucedida e sua repetição preservaram também os novos leads, eventos e conteúdo de foto sintético.
 - [x] Runtime de oito migrações rejeita banco com sete; runtime mantém DML nas tabelas novas, sem CREATE no schema ou escrita no catálogo. O teste em memória não substitui PostgreSQL e imagem reais em staging.
-- [x] Contexto Docker usa inclusão explícita de fontes/SQL/pacotes e do WebP de marca; exclusões privadas ficam por último. Sentinelas de nomes `.env`, `.npmrc`, bancos, dumps, chaves, fixtures, testes e `.qa` foram conferidas sem ler ou criar dados privados. O teste usa somente o subconjunto comum de padrões; a imagem efetiva continua pendente.
+- [x] Contexto Docker usa inclusão explícita de fontes/SQL/pacotes, do WebP de marca e dos dois WebPs do retrato fornecido; exclusões privadas ficam por último. Sentinelas de nomes `.env`, `.npmrc`, bancos, dumps, chaves, fixtures, testes e `.qa` foram conferidas sem ler ou criar dados privados. O teste usa somente o subconjunto comum de padrões; a imagem efetiva continua pendente.
 
 ## Bloqueios antes de publicar
 
-- [ ] Foto real de Bruno: receber o caminho local autorizado, ver os pixels, preservar original, otimizar e revisar cortes desktop/390/320. As tentativas anteriores deram 403. Uma nova tentativa única, explicitamente autorizada para `C:\Users\andre\Documents\Brunão\fotos-bruno`, chegou à aplicação de metadados mas falhou com `AttributeError: module 'os' has no attribute 'setxattr'`. A pasta foi criada e continua sem arquivos materializados; as outras quatro transferências não foram executadas. Não houve contorno nem alteração do helper oficial. A captura atual está explicitamente sem foto.
+- [x] Retrato local fornecido e confirmado: cinco imagens presentes e vistas em pixels; retrato individual P&B na poltrona integrado ao hero/apresentação, originais preservados e WebPs de 34 KB/15 KB com cortes desktop/390/320 conferidos. A materialização automática anterior não foi concluída (403 e depois `os.setxattr` ausente); a integração atual usa o caminho local explicitamente fornecido, sem nova tentativa ou contorno. Fonte e hashes em [bruno-portrait-assets.json](bruno-portrait-assets.json).
 - [ ] Aprovação editorial da regra `SIM_RADAR_SELF_REPORT_V1`, baseada no código fornecido de 15 perguntas; não afirmar reprodução exata das etapas não observadas da versão pública atual. Resultado orientativo por regras locais, sem diagnóstico ou validação científica.
 - [ ] Responsável confirmar retenção/remoção dos contatos e fotos, canal de privacidade e texto de uso. E-mail/WhatsApp declarados ainda não são verificados: o formulário não prova a identidade nem legitima campanha automática.
 - [ ] Confirmar organização de destino existente e autorizada. Definir `SIM_RADAR_ORG_ID` apenas na configuração operacional segura; ausência ou organização inválida retorna 503. Não escolher tenant por inferência ou configurar credenciais aqui.
@@ -43,7 +43,7 @@ Detalhamento operacional: [radar-profile-rollout.md](radar-profile-rollout.md). 
 
 Servidor local de QA: `http://127.0.0.1:5191`, somente fixtures sintéticas e adaptadores externos desativados. Evidências privadas em `.qa/full-tests-serial.log`, `.qa/screenshots/` e roteiros Chrome; não incluídas no contexto da imagem.
 
-A captura `shape-is-money-vendas-revisao-sem-foto.png` foi salva na Library, ID `libfile_5220ec715a808191a7212ba8bb2acabd`, versão 0. Ela mostra a LP sem foto de Bruno e sem alunos reais. A identidade exata foi preservada num arquivo privado de metadados local; o helper oficial não pôde aplicar atributos estendidos neste Windows. A tentativa posterior das fotos e seu bloqueio estão descritos acima; a LP continua sem foto.
+A captura `shape-is-money-vendas-revisao-sem-foto.png` foi salva na Library, ID `libfile_5220ec715a808191a7212ba8bb2acabd`, versão 0. Ela registra a versão anterior sem foto de Bruno e sem alunos reais. A tentativa automática posterior das fotos falhou, mas os arquivos foram depois fornecidos manualmente no caminho local e o retrato foi integrado. A captura final `shape-is-money-vendas-com-bruno.png` foi salva na Library com status confirmado `succeeded`, ID `libfile_9f660d00a740819184966a9ae77392b2`, versão 0, e cópia local em `.qa/screenshots/`. O helper oficial não pôde aplicar atributos estendidos neste Windows (`os.setxattr` ausente); as identidades exatas das capturas e essa limitação estão registradas em arquivos privados de metadados, sem afirmar persistência local de xattrs.
 
 ## Correção do lock após QA do candidato ad276ca
 

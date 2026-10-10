@@ -46,6 +46,8 @@
 !public/sim/profile-ui.js
 !public/sim/assets/
 !public/sim/assets/architecture.webp
+!public/sim/assets/bruno-barbosa-667.webp
+!public/sim/assets/bruno-barbosa-400.webp
 
 # Keep private/test exclusions last: later inclusions must never reopen them.
 **/node_modules

@@ -35,6 +35,7 @@ test('public capture/events are idempotent and separate consent, track abandonme
     const leadId=f.store.get('SELECT id FROM radar_leads').id;for(let i=0;i<55;i++)f.store.run('INSERT INTO radar_runs VALUES (?,?,?,?,?,?,?,?)',randomUUID(),leadId,'synthetic-old-hash-'+i,Date.now()+10000,'registered',RADAR_VERSION,'radar',i);
     const bounded=(await admin('crm/radar')).data.leads[0];assert.equal(bounded.runs.length,50);assert.equal(bounded.totalRuns,58);assert.equal(f.store.get('SELECT COUNT(*) AS n FROM radar_runs').n,58);
     for(const path of ['/','/radar','/vendas','/privacidade'])assert.equal((await fetch(f.origin+path)).status,200);
+    for(const width of [400,667]){const response=await fetch(f.origin+'/sim/assets/bruno-barbosa-'+width+'.webp');assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/webp');assert.ok((await response.arrayBuffer()).byteLength>1000);}
   }finally{await f.close();}
 });
 
