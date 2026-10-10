@@ -1,3 +1,5 @@
+import {draftJobFlow} from './draft-jobs.mjs';
+import {protocolNotificationFlow} from './protocol-notifications.mjs';
 import {trainingVideoFlow} from './training-videos.mjs';
 import {nutritionProposalFlow} from './nutrition-proposals.mjs';
 import {accessPolicy} from './access-policy.mjs';
@@ -23,7 +25,7 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:publicTrainingContent(JSON.parse(p.content)),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={},protocolEmail={},draftJobs={}}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
   const access=accessPolicy({store,now,deny,audit});
@@ -51,7 +53,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     const key=req.headers['idempotency-key'];if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,80}$/.test(key))deny(400,'Chave de operação obrigatória.');
     const hash=createHash('sha256').update(req.method+' '+req.url+' '+JSON.stringify(body)).digest('hex');
     return await store.transaction(async()=>{await store.lockActor(actor.id);const currentActor=await store.get('SELECT active,role,org_id FROM users WHERE id=?',actor.id),live=await session(req);if(!currentActor?.active||currentActor.role!==actor.role||currentActor.org_id!==actor.org_id||live?.user.id!==actor.id)deny(401,'Acesso ou sessão mudou. Entre novamente.');const previous=await store.get('SELECT * FROM operations WHERE actor_id=? AND operation_key=?',actor.id,key);if(previous){if(previous.request_hash!==hash)deny(409,'Chave reutilizada para outro pedido.');return {status:previous.status,data:JSON.parse(previous.result)};}
-      const result=await work();await store.run('INSERT INTO operations VALUES (?,?,?,?,?)',actor.id,key,hash,result.status,JSON.stringify(result.data));return result;});
+      const result=await work();await drafts.observeLocked(actor,req,body);await store.run('INSERT INTO operations VALUES (?,?,?,?,?)',actor.id,key,hash,result.status,JSON.stringify(result.data));return result;});
   }
   async function saveOnboarding(actor,req,row,body,event){
     exact(body,['goal','days','experience','context','revision']);
@@ -81,15 +83,17 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
     return async()=>{await store.lockStudent(row.id);trainingManager(actor,await student(actor,row.id));const id=randomUUID();await store.run('INSERT INTO plans(id,student_id,author_id,title,content,status) VALUES (?,?,?,?,?,?)',id,row.id,actor.id,title,JSON.stringify({exercises,daysPerWeek,...(instructions?{instructions}:{})}),'draft');await audit(actor,row.id,'plan.drafted');return {status:201,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',id))}};};
   }
   const passwordAccess=passwordAccessFlow({store,now,deny,exact,email,text,read,audit,mutation,student,policy:access,security,configuration:accessEmail});
+  const notices=protocolNotificationFlow({store,now,deny,exact,read,mutation,student,policy:access,audit,security,configuration:protocolEmail});
   const manualTraining=manualTrainingFlow({store,deny,exact,text,read,mutation,student,trainingManager,audit,publicPlan});
   const intake=anamnesisFlow({store,now,deny,exact,read,mutation,student,audit,changed:(...args)=>sla.changed(...args,'anamnesis'),start:(...args)=>sla.start(...args)});
-  const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit,intakeState:intake.state});
+  const sla=serviceFlow({store,now,deny,exact,text,read,mutation,student,audit,intakeState:intake.state,accessState:access.state});
   const budget=monthlyBudget({store,now,deny,exact,text,read,mutation,student,audit,configuration:chat});
   const trainingSafetyFlow=trainingSafety({store,now,deny,exact,text,read,mutation,student,audit,externalEnabled:()=>!security.production&&trainingProposals.enabled===true&&trainingProposals.externalGate===true&&trainingProposals.mode==='external-reviewed'});
   const trainingProposal=trainingProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,safety:trainingSafetyFlow,security,configuration:trainingProposals,budgetConfiguration:trainingProposals.mode==='external-reviewed'?trainingProposals.budget||{}:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
-  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit,proposalGuard:(actor,plan)=>nutritionProposal.assertPlanApproval(actor,plan)});
+  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit,proposalGuard:(actor,plan)=>nutritionProposal.assertPlanApproval(actor,plan),published:async(actor,plan)=>notices.queueLocked(actor,await student(actor,plan.student_id),{kind:'nutrition',planId:plan.id})});
   const nutritionProposal=nutritionProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,security,nutrition,assertNutritionAccess:row=>access.assertActive(row,'nutrition'),configuration:nutritionProposals});
+  const drafts=draftJobFlow({store,now,deny,exact,text,read,mutation,student,audit,policy:access,security,engines:{training:trainingProposal.job,nutrition:nutritionProposal.job},configuration:draftJobs});
   const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
   const videoFlow=trainingVideoFlow({store,now,deny,student,access,security,configuration:trainingVideos,methodology:trainingProposals.methodology,exact,text,read,mutation,audit});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
@@ -185,14 +189,16 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
           else if(action==='publish'){if(!current.approved_by||current.approved_revision!==current.revision-1)deny(409,'Aprovação desatualizada.');updated=await store.run("UPDATE plans SET status='published',published_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=?",now(),plan.id,body.revision,required);}
           else updated=await store.run("UPDATE plans SET status='review',revision=revision+1 WHERE id=? AND revision=? AND status=?",plan.id,body.revision,required);
           if(updated.changes!==1)deny(409,'Plano mudou. Recarregue.');
-          if(action==='publish')await videoFlow.snapshot(actor,current,row);
+          if(action==='publish'){await videoFlow.snapshot(actor,current,row);await notices.queueLocked(actor,await student(actor,row.id),{kind:'training',planId:plan.id});}
             await audit(actor,row.id,'plan.'+action);return {status:200,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',plan.id))}};});return send(result.status,result.data);
       }
       if(route==='/api/local/audit'&&req.method==='GET'){
         if(actor.role==='student')deny(403,'Auditoria restrita à equipe.');const ids=(await list(actor)).map(s=>s.id);const rows=(await store.all('SELECT id,actor_id,student_id,event,created_at FROM audit WHERE org_id=? ORDER BY created_at DESC LIMIT 100',actor.org_id)).filter(a=>actor.role==='admin'||a.actor_id===actor.id||ids.includes(a.student_id));return send(200,{audit:rows});
       }
+      const draftResult=await drafts.handle(actor,req,route);if(draftResult)return send(draftResult.status,draftResult.data);
+      const noticeResult=await notices.handle(actor,req,route);if(noticeResult)return send(noticeResult.status,noticeResult.data);
       deny(404,'Recurso não encontrado. Uploads ainda indisponíveis.');
     }catch(error){const code=error instanceof Failure||error.safe===true?error.status:['23505','SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)?409:500;send(code,{error:error instanceof Failure||error.safe===true?error.message:code===409?'Este cadastro ou operação já existe.':'Não foi possível concluir a operação.'});}
   };
-  handle.flushAccessEmail=()=>passwordAccess.flush();handle.close=async()=>{chatFlow.close();trainingProposal.close();await passwordAccess.close();};return handle;
+  handle.flushDraftJobs=()=>drafts.flush();handle.flushAccessEmail=()=>passwordAccess.flush();handle.flushProtocolEmail=()=>notices.flush();handle.close=async()=>{chatFlow.close();trainingProposal.close();await passwordAccess.close();await notices.close();await drafts.close();};return handle;
 }

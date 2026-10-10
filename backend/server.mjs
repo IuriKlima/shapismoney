@@ -1,3 +1,4 @@
+import {protocolMailConfiguration} from './protocol-notifications.mjs';
 import {nutritionRuntimeConfiguration} from './nutrition-runtime.mjs';
 import {createAnalysisDemo} from './analysis-demo.mjs';
 import {trainingRuntimeConfiguration} from './training-runtime.mjs';
@@ -9,6 +10,7 @@ import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {openLocalStore} from './store.mjs';
+import {draftJobConfiguration} from './draft-jobs.mjs';
 import {createLocalService} from './service.mjs';
 import {asyncLocalStore} from './async-store.mjs';
 import {assertRequest,localSecurity,productionSecurity} from './security.mjs';
@@ -28,11 +30,11 @@ export async function createLocalServer({filename,store:provided,security=localS
     if((url.pathname==='/analysis-demo'||url.pathname==='/sim/analysis-demo.js'||url.pathname==='/sim/analysis-demo.css')&&!demonstration.enabled){res.writeHead(404);return res.end();}
     if(url.pathname.startsWith('/api/'))return api(req,res);
     if(req.method!=='GET'&&!(req.method==='HEAD'&&['/','/local'].includes(url.pathname))){res.writeHead(405);return res.end();}
-    const files={'/sim/analysis-demo.css':'analysis-demo.css','/analysis-demo':'analysis-demo.html','/sim/analysis-demo.js':'analysis-demo.js','/':'persistent.html','/local':'persistent.html','/sim/persistent.js':'persistent.js','/sim/access-ui.js':'access-ui.js','/sim/manual-training-ui.js':'manual-training-ui.js','/sim/nutrition-proposal-ui.js':'nutrition-proposal-ui.js','/sim/nutrition-ui.js':'nutrition-ui.js','/sim/budget-ui.js':'budget-ui.js','/sim/intake-fields.js':'intake-fields.js','/sim/intake-ui.js':'intake-ui.js','/sim/crm-ui.js':'crm-ui.js','/sim/supervision-ui.js':'supervision-ui.js','/sim/training-proposals-ui.js':'training-proposals-ui.js','/sim/training-session-editor.js':'training-session-editor.js','/sim/style.css':'style.css','/sim/logo.svg':'logo.svg'};const name=files[url.pathname];if(!name){res.writeHead(404);return res.end();}
+    const files={'/sim/notification-ui.js':'notification-ui.js','/sim/analysis-demo.css':'analysis-demo.css','/analysis-demo':'analysis-demo.html','/sim/analysis-demo.js':'analysis-demo.js','/':'persistent.html','/local':'persistent.html','/sim/persistent.js':'persistent.js','/sim/access-ui.js':'access-ui.js','/sim/manual-training-ui.js':'manual-training-ui.js','/sim/nutrition-proposal-ui.js':'nutrition-proposal-ui.js','/sim/nutrition-ui.js':'nutrition-ui.js','/sim/budget-ui.js':'budget-ui.js','/sim/intake-fields.js':'intake-fields.js','/sim/intake-ui.js':'intake-ui.js','/sim/crm-ui.js':'crm-ui.js','/sim/supervision-ui.js':'supervision-ui.js','/sim/training-proposals-ui.js':'training-proposals-ui.js','/sim/training-session-editor.js':'training-session-editor.js','/sim/style.css':'style.css','/sim/logo.svg':'logo.svg'};const name=files[url.pathname];if(!name){res.writeHead(404);return res.end();}
     const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'};
     try{let body=readFileSync(path.join(root,name));if(security.production&&name==='persistent.html')body=Buffer.from(body.toString().replace('Fatia local persistente · somente dados fictícios · convites com entrega manual; sem pagamentos ou uploads. Este fluxo usa sessões e banco no servidor, separado da demonstração.','Acompanhamento com acesso individual. Propostas de treino exigem aprovação profissional; pagamentos e uploads ainda indisponíveis.'));res.writeHead(200,{'Content-Type':types[path.extname(name)]});res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Recurso indisponível.');}
   });
-  return {server,store,flushAccessEmail:()=>api.flushAccessEmail?.(),close:async()=>{await api.close?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await serviceStore.close();}};
+  return {server,store,flushDraftJobs:()=>api.flushDraftJobs?.(),flushAccessEmail:()=>api.flushAccessEmail?.(),flushProtocolEmail:()=>api.flushProtocolEmail?.(),close:async()=>{await api.close?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await serviceStore.close();}};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   let app;
@@ -41,7 +43,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     const port=Number(process.env.SIM_BACKEND_PORT||'5190');if(!Number.isInteger(port)||port<1||port>65535)throw Error('Invalid application port.');
     const ai=resolveAIConfiguration(process.env);
     let store;if(production){store=postgresStore(poolFromEnvironment());try{await verifyRuntimeRole(store);}catch(error){await store.close();throw error;}}
-    app=await createLocalServer({filename:path.resolve('.qa/local-backend/app.sqlite'),store,security,ai,analysisDemo:{enabled:process.env.SIM_ANALYSIS_DEMO_ENABLED==='true',videoDirectory:process.env.SIM_VIDEO_DIR},trainingProposals:trainingRuntimeConfiguration(process.env,security),nutritionProposals:nutritionRuntimeConfiguration(process.env,security),chat:chatRuntimeConfiguration(process.env,ai),accessEmail:accessMailConfiguration(process.env,security)});
+    const accessEmail=accessMailConfiguration(process.env,security);
+    app=await createLocalServer({filename:path.resolve('.qa/local-backend/app.sqlite'),store,security,ai,analysisDemo:{enabled:process.env.SIM_ANALYSIS_DEMO_ENABLED==='true',videoDirectory:process.env.SIM_VIDEO_DIR},trainingProposals:trainingRuntimeConfiguration(process.env,security),nutritionProposals:nutritionRuntimeConfiguration(process.env,security),chat:chatRuntimeConfiguration(process.env,ai),accessEmail,protocolEmail:protocolMailConfiguration(process.env,accessEmail),draftJobs:draftJobConfiguration(process.env,security)});
     app.server.listen(port,production?'0.0.0.0':'127.0.0.1',()=>console.log('SIM backend started | '+(production?'PostgreSQL / trusted HTTPS proxy':'local loopback / no accounts provisioned')));
     for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>app.close().then(()=>process.exit(0)));
   }catch{console.error('SIM startup failed: validate PostgreSQL roles/migrations, HTTPS origin, proxy and required environment. No fallback was started.');process.exitCode=1;}

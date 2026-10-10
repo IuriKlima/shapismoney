@@ -1,4 +1,6 @@
 import {trainingPDFBytes} from './manual-training-fixtures.mjs';
+import {sessionsConfiguration} from './training-sessions-fixtures.mjs';
+import {DRAFT_JOB_MARKER} from '../backend/draft-jobs.mjs';
 import {syntheticTrainingConfiguration,syntheticTrainingBudget} from './training-proposal-fixtures.mjs';
 import {TRAINING_PROPOSAL_PURPOSE} from '../backend/training-safety.mjs';
 import {INTAKE_VERSION,CONSENT_VERSION} from '../public/sim/intake-fields.js';
@@ -19,6 +21,42 @@ async function embedded(){
   const pool={query:async(...args)=>{const release=await acquire();try{return await query(...args);}finally{release();}},connect:async()=>{const release=await acquire();return {query,release};},end:()=>db.close()};
   return {db,store:postgresStore(pool)};
 }
+
+test('PostgreSQL limited 007: automatic offline draft and journal acknowledgement commit together without new migration or replay',async()=>{
+ const {db,store}=await embedded();await migratePostgres(store);await db.exec('SET ROLE sim_app');await verifyRuntimeRole(store);
+ const org=randomUUID(),coach=randomUUID(),studentUser=randomUUID(),studentId=randomUUID(),password=await hashPassword(FIXTURE_PASSWORD);
+ await store.run('INSERT INTO organizations VALUES (?,?)',org,'Synthetic durable drafts');
+ for(const [id,role] of [[coach,'coach'],[studentUser,'student']])await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,org,role+'@fixture.invalid','Synthetic '+role,role,password);
+ await store.run('INSERT INTO students(id,org_id,user_id,coach_id,email,name) VALUES (?,?,?,?,?,?)',studentId,org,studentUser,coach,'student@fixture.invalid','Synthetic student');await seedReviewedIntake(store,studentId,coach);
+ const app=await createLocalServer({store,chat:syntheticTrainingBudget,trainingProposals:sessionsConfiguration(org),draftJobs:{enabled:true,reviewed:true,expiresAt:Date.now()+3600000,maxAttemptUSD:.05,totalUSD:.10,maxCalls:2,poll:false}});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));
+ const origin='http://127.0.0.1:'+app.server.address().port;let cookie='';
+ const req=async(route,body,method='POST')=>{const r=await fetch(origin+'/api/local/'+route,{method,headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json','Idempotency-Key':randomUUID()},body:JSON.stringify(body)});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};};
+ try{
+  assert.equal((await req('login',{email:'student@fixture.invalid',password:FIXTURE_PASSWORD})).status,200);
+  assert.equal((await req('students/'+studentId+'/training-proposal-consent',{purpose:TRAINING_PROPOSAL_PURPOSE,sequence:0,anamnesisRevision:1,enabled:true,confirmed:true},'PUT')).status,200);
+  await Promise.all([app.flushDraftJobs(),app.flushDraftJobs()]);await app.flushDraftJobs();
+  const plan=await store.get('SELECT * FROM plans');assert.equal(plan.status,'draft');assert.equal(plan.approved_by,null);assert.equal(JSON.parse(plan.content).proposalSource.automaticDraft,true);
+  const journal=(await store.all('SELECT result FROM operations WHERE request_hash=?',DRAFT_JOB_MARKER)).map(r=>JSON.parse(r.result));assert.equal(journal.filter(j=>j.state==='draft-ready').length,1);assert.equal(journal.find(j=>j.state==='draft-ready').planId,plan.id);assert.equal((await store.get('SELECT COUNT(*)::integer n FROM ai_monthly_reservations')).n,1);assert.equal((await store.all('SELECT * FROM schema_migrations')).length,7);await assert.rejects(()=>store.query('CREATE TABLE forbidden_draft_jobs(id integer)'));
+ }finally{await app.close();}
+});
+
+test('published plan notice and explicit read persist through the PostgreSQL adapter under limited fixture role',async()=>{
+ const {db,store}=await embedded();await migratePostgres(store);
+ await db.exec('SET ROLE sim_app');await verifyRuntimeRole(store);
+ const org=randomUUID(),admin=randomUUID(),user=randomUUID(),sid=randomUUID(),hash=await hashPassword(FIXTURE_PASSWORD);
+ await store.run('INSERT INTO organizations VALUES (?,?)',org,'Synthetic notice org');
+ for(const [id,email,role] of [[admin,'admin-notice@fixture.invalid','admin'],[user,'student-notice@fixture.invalid','student']])await store.run('INSERT INTO users(id,org_id,email,name,role,password_hash) VALUES (?,?,?,?,?,?)',id,org,email,'Synthetic notice identity',role,hash);
+ await store.run('INSERT INTO students(id,org_id,user_id,coach_id,email,name) VALUES (?,?,?,?,?,?)',sid,org,user,admin,'student-notice@fixture.invalid','Synthetic notice recipient');await seedReviewedIntake(store,sid,admin);
+ const app=await createLocalServer({store});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+app.server.address().port;
+ const client=()=>{let cookie='';return async(route,body)=>{const r=await fetch(origin+'/api/local/'+route,{method:body===undefined?'GET':'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:cookie,'Idempotency-Key':randomUUID()},body:body===undefined?undefined:JSON.stringify(body)});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];const data=await r.json();assert.equal(r.status,route.includes('/plans')&&!route.endsWith('publish')&&!route.endsWith('approve')&&!route.endsWith('submit')?201:200,JSON.stringify(data));return data;};};
+ try{
+  const a=client(),s=client();await a('login',{email:'admin-notice@fixture.invalid',password:FIXTURE_PASSWORD});await s('login',{email:'student-notice@fixture.invalid',password:FIXTURE_PASSWORD});
+  let p=(await a('students/'+sid+'/plans',{title:'Synthetic PG notice plan',exercises:[{name:'Synthetic movement',sets:2,reps:8}]})).plan;
+  for(const action of ['submit','approve','publish'])p=(await a('plans/'+p.id+'/'+action,{revision:p.revision})).plan;
+  const result=await s('notifications');assert.equal(result.notifications.length,1);assert.equal(result.notifications[0].planId,p.id);assert.equal(result.notifications[0].emailState,'disabled');
+  await s('notifications/'+result.notifications[0].id+'/read',{confirmed:true});assert.equal((await s('notifications')).unread,0);
+ }finally{await app.close();}
+});
 
 test('reset racing an old-password login cannot create a post-reset authenticated session', {timeout:20000}, async()=>{
  const {store}=await embedded();await migratePostgres(store);const org=randomUUID(),user=randomUUID(),messages=[],oldHash=await hashPassword(FIXTURE_PASSWORD),address='reset-race@fixture.invalid';
