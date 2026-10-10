@@ -861,3 +861,5 @@
 .persistent-page #local-app .notice{color:#39332a}
 
 #training-video-admin-section{overflow-wrap:anywhere}#training-video-admin-section form{display:block}#training-video-admin-section :is(input,select,textarea){min-width:0;max-width:100%}#training-video-admin-section .btn{white-space:normal;max-width:100%}
+
+.commerce-panel{min-width:0}.commerce-plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:16px}.commerce-workspace{max-width:900px;margin:auto}.commerce-panel input,.commerce-panel select,.commerce-panel button{max-width:100%}.commerce-panel .note{overflow-wrap:anywhere}.commerce-order button{margin:6px 8px 6px 0}

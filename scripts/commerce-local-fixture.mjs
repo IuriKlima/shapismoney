@@ -1,0 +1,11 @@
+import {rmSync} from 'node:fs';
+import {isolatedFixture} from '../tests/backend-fixtures.mjs';
+import {applyCommerceFixture} from '../backend/commerce/migrate-fixture.mjs';
+import {createLocalServer} from '../backend/server.mjs';
+if(process.env.NODE_ENV==='production')throw Error('Fixture refuses production.');
+const f=await isolatedFixture();applyCommerceFixture(f.store,{fixtureOnly:true});
+const app=await createLocalServer({store:f.store,loginLimit:100,commerce:{enabled:true,fixtureOnly:true,adminId:f.ids.admin}});
+await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+console.log('COMMERCE_FIXTURE http://127.0.0.1:'+app.server.address().port+'/local');
+console.log('Synthetic admin: admin@fixture.invalid | password documented in tests/backend-fixtures.mjs. No email or provider calls.');
+for(const signal of ['SIGTERM','SIGINT'])process.once(signal,async()=>{await app.close();rmSync(f.directory,{recursive:true,force:true});process.exit(0);});

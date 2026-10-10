@@ -1,3 +1,4 @@
+import {commerceRuntime} from './commerce/runtime.mjs';
 import {trainingVideoFlow} from './training-videos.mjs';
 import {nutritionProposalFlow} from './nutrition-proposals.mjs';
 import {accessPolicy} from './access-policy.mjs';
@@ -23,10 +24,10 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:publicTrainingContent(JSON.parse(p.content)),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={},commerce={}}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
-  const access=accessPolicy({store,now,deny,audit});
+  let commercial=null;const access=accessPolicy({store,now,deny,audit,commerceState:row=>commercial?.accessState(row)});
   const userDTO=async u=>({...publicUser(u),...(u.role==='student'?{access:await access.userSummary(u)}:{})});
   async function session(req){
     const match=new RegExp('(?:^|;\\s*)'+security.cookieName+'=([A-Za-z0-9_-]{43})(?:;|$)').exec(req.headers.cookie||'');
@@ -94,6 +95,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const videoFlow=trainingVideoFlow({store,now,deny,student,access,security,configuration:trainingVideos,methodology:trainingProposals.methodology,exact,text,read,mutation,audit});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
   const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate:async row=>{await access.assertActive(row);}});
+  commercial=await commerceRuntime({store,security,session,now,read,configuration:commerce});
   const handle=async function handle(req,res){
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
     try{
@@ -114,8 +116,12 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         res.setHeader('Set-Cookie',cookieHeader(security,token,Math.floor(sessionMs/1000)));return send(200,{user:await userDTO(authenticated)});
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
-      const passwordResult=await passwordAccess.handlePublic(req,connection,route);if(passwordResult){if(passwordResult.clearSession)res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(passwordResult.status,passwordResult.data);}
+      if(route==='/api/local/commerce/capabilities'&&!commercial)return send(200,{enabled:false,simulation:true,realCheckoutEnabled:false});
+      const commercePublic=await commercial?.handlePublic(req,route);
+      if(commercePublic&&!commercePublic.forwardPasswordBody){if(commercePublic.buyerCookie)res.setHeader('Set-Cookie',[commercePublic.buyerCookie,...(commercePublic.clearSession?[cookieHeader(security,'',0)]:[])]);return send(commercePublic.status,commercePublic.data);}
+      const passwordResult=await passwordAccess.handlePublic(req,connection,route,commercePublic?.forwardPasswordBody);if(passwordResult){if(passwordResult.clearSession)res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(passwordResult.status,passwordResult.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const commerceAdmin=await commercial?.handleAdmin(req,route);if(commerceAdmin)return send(commerceAdmin.status,commerceAdmin.data);
       const videoReview=await videoFlow.editor(actor,req,route);if(videoReview)return send(videoReview.status,videoReview.data);
       if(await videoFlow.handle(actor,req,res,route))return;
       const accessResult=await passwordAccess.handle(actor,req,route);if(accessResult)return send(accessResult.status,accessResult.data);
@@ -131,7 +137,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(route==='/api/local/ai'&&req.method==='POST'){deny(503,'Rota antiga de IA desativada. Use o chat autorizado.');}
       if(route==='/api/local/session'&&req.method==='GET')return send(200,{user:await userDTO(actor)});
       if(route==='/api/local/logout'&&req.method==='POST'){
-        const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);trainingProposal.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(200,{loggedOut:true});
+        const body=await read(req);exact(body,[]);chatFlow.clearAuth(auth.hash);trainingProposal.clearAuth(auth.hash);await store.transaction(async()=>{await store.run('DELETE FROM sessions WHERE token_hash=?',auth.hash);await audit(actor,null,'logout');});res.setHeader('Set-Cookie',[cookieHeader(security,'',0),...(commercial?[await commercial.logout(req)]:[])]);return send(200,{loggedOut:true});
       }
       const nutritionProposalResult=await nutritionProposal.handle(actor,auth,req,route);if(nutritionProposalResult)return send(nutritionProposalResult.status,nutritionProposalResult.data);
       const nutritionResult=await nutrition.handle(actor,req,route);if(nutritionResult)return send(nutritionResult.status,nutritionResult.data);
@@ -169,7 +175,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
           });return send(result.status,result.data);
         }
         if(studentMatch[2]==='/onboarding'&&req.method==='PUT'){trainingManager(actor,row);const result=await saveOnboarding(actor,req,row,await read(req),'onboarding.recorded');return send(result.status,result.data);}
-        if(studentMatch[2]==='/plans'&&req.method==='GET'){const plans=await store.all('SELECT * FROM plans WHERE student_id=?'+(actor.role==='student'?" AND status='published'":'')+' ORDER BY published_at DESC,id DESC',row.id);return send(200,{plans:plans.map(publicPlan)});}
+        if(studentMatch[2]==='/plans'&&req.method==='GET'){if(actor.role==='student')await access.assertActive(row,'training');const plans=await store.all('SELECT * FROM plans WHERE student_id=?'+(actor.role==='student'?" AND status='published'":'')+' ORDER BY published_at DESC,id DESC',row.id);return send(200,{plans:plans.map(publicPlan)});}
         if(studentMatch[2]==='/plans'&&req.method==='POST'){
           const body=await read(req);const result=await mutation(actor,req,body,await planWork(actor,row.id,body));return send(result.status,result.data);
         }

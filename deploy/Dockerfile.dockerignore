@@ -31,3 +31,9 @@
 !public/sim/training-session-editor.js
 
 !public/sim/nutrition-proposal-ui.js
+
+!public/sim/commerce-ui.js
+# Explicit fixture-only migrations and helpers never enter the runtime image.
+backend/commerce/migrate-fixture.mjs
+backend/commerce/migrations/**
+backend/commerce/schema.sql
