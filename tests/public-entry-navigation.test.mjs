@@ -12,7 +12,35 @@ const request=(url='/',method='GET',headers={})=>({url,method,socket:{remoteAddr
 
 const raw=async(url,{method='GET',headers={},body}={})=>new Promise((resolve,reject)=>{const req=httpRequest(new URL(url),{method,headers},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,text:Buffer.concat(chunks).toString('utf8')}));});req.on('error',reject);req.end(body);});
 
-test('exact Gmail navigation without Origin/cookie/token permits only public root/local documents GET and HEAD',()=>{for(const url of ['/','/local'])for(const method of ['GET','HEAD'])assert.equal(assertRequest(request(url,method),security).clientIP,'203.0.113.10');});
+test('exact Gmail navigation without Origin/cookie/token permits public entry documents GET and HEAD',()=>{for(const url of ['/','/app','/login','/local'])for(const method of ['GET','HEAD'])assert.equal(assertRequest(request(url,method),security).clientIP,'203.0.113.10');});
+
+test('app aliases preserve navigation-only access, Origin, HTTPS and proxy restrictions',()=>{
+ for(const url of ['/app','/login']){
+  for(const method of ['POST','PUT','DELETE'])assert.throws(()=>assertRequest(request(url,method,{origin:security.origin}),security),e=>e.status===403);
+  for(const headers of [{'sec-fetch-mode':'cors'},{'sec-fetch-dest':'iframe'},{origin:'https://other.example.test'},{'x-forwarded-proto':'http'},{host:'other.example.test'}])assert.throws(()=>assertRequest(request(url,'GET',headers),security),e=>e.status===403);
+  assert.throws(()=>assertRequest({...request(url),socket:{remoteAddress:'172.20.0.99'}},security),e=>e.status===403);
+  assert.throws(()=>assertRequest(request(url),{...security,stage:'staging',clients:['203.0.113.11']}),e=>e.status===403);
+ }
+});
+
+test('direct GET, refresh and HEAD serve app/login/local identically and preserve public route documents',async()=>{
+ const directory=mkdtempSync(path.join(os.tmpdir(),'shape-entry-aliases-'));
+ const app=await createLocalServer({filename:path.join(directory,'db.sqlite')});
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));
+ const origin='http://127.0.0.1:'+app.server.address().port;
+ try{
+  const original=await raw(origin+'/local',{headers:gmail});
+  assert.equal(original.status,200);assert.match(original.text,/id="local-app"/);
+  for(const route of ['/app','/login','/local']){
+   for(let refresh=0;refresh<2;refresh++){
+    const page=await raw(origin+route,{headers:gmail});
+    assert.equal(page.status,200);assert.equal(page.headers.location,undefined);assert.equal(page.text,original.text);
+   }
+   const head=await raw(origin+route,{method:'HEAD',headers:gmail});assert.equal(head.status,200);assert.equal(head.text,'');
+  }
+  for(const route of ['/','/vendas','/radar']){const page=await raw(origin+route,{headers:gmail});assert.equal(page.status,200);assert.match(page.text,/id="public-app"/);assert.doesNotMatch(page.text,/id="local-app"/);}
+ }finally{await app.close();rmSync(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
+});
 
 test('cross-site APIs, mutations, private/other resources and incomplete Fetch Metadata remain blocked',()=>{
  for(const url of ['/api/local/login','/api/local/students','/api/local/password-access/confirm','/api/local/plans/00000000-0000-0000-0000-000000000000/file','/sim/persistent.js','/sim/style.css','/local/','/unknown'])assert.throws(()=>assertRequest(request(url),security),e=>e.status===403);
