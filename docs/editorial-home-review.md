@@ -25,3 +25,7 @@ The seven markers are explicitly illustrative. No invented trends, score, clinic
 - Source changes do not modify production data, authentication, AI, billing or integrations. Backend changes only map the new sales document and two public image assets; Dockerfile includes sales.html.
 
 Desktop/mobile screenshots are in the task's `home-qa` directory. Before deployment: publish a separate branch and rollback reference, run focused tests with actual installed dependencies, deploy, confirm health, exact files and public routes.
+
+## Quality refinement
+
+Base/rollback: 0470fc833869cfe09b6baeeb5cac68059ecb9465. The confirmed original portrait is 667 x 835 pixels; the hero is capped at 480 CSS pixels. The original JPEG is retained without recompression and a 400px derivative serves small layouts. This is not native 4K photography. Earlier mockups were 375 x 812 and 1009 x 749 compressed captures with CSS rotation. New fictional-data captures render the actual UI at 2x CSS zoom: tablet 2033 x 1332, phone 685 x 1313; the 1016 x 666 tablet alternative has matching composition. Temporary zoom was removed from application files. Neutral device frames and unrotated screens preserve legibility. Self-hosted Cormorant Garamond (Google Fonts, SIL OFL license included) provides editorial typography. Black/ivory/gold styling, constrained portrait size, restrained lighting and mobile composition were refined without changing claims or product functionality. Font source: https://github.com/google/fonts/tree/main/ofl/cormorantgaramond .

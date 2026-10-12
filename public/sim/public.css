@@ -144,3 +144,72 @@
 .sim-device-scene figcaption{font-size:11px;color:#c6c0b6;line-height:1.7;margin:16px 0 0;max-width:460px}
 @media(min-width:1100px){.sim-experience .sim-two-columns{grid-template-columns:.85fr 1.15fr;gap:65px}.sim-device-stage{min-height:410px;padding-top:55px}}
 @media(max-width:760px){.sim-device-stage{min-height:0;padding:34px 30px 70px 0;margin-top:18px}.sim-tablet{padding:5px;border-radius:12px}.sim-tablet img{border-radius:8px}.sim-phone{width:31%;padding:4px;border-radius:15px;bottom:20px;right:3px}.sim-phone img{border-radius:11px}.sim-gold-icon{width:44px;height:44px;margin-bottom:18px}.sim-marker-grid .sim-index{margin-top:-56px}.sim-device-scene figcaption{font-size:10px}}
+/* Optical refinement: native source photo, self-hosted display type and crisp device surfaces. */
+@font-face{font-family:SIM Editorial;src:url('/sim/assets/cormorant-garamond-latin.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
+.sales-page{--sim-gold:#b99b68;-webkit-font-smoothing:antialiased}
+.sales-page h1,.sales-page h2,.sales-page .sim-statement,.sales-page .sim-manifesto,.sim-method-list h3{font-family:'SIM Editorial',Georgia,serif}
+.sales-page .sim-nav{height:88px;max-width:1440px;margin:auto;border-bottom-color:#ffffff14;padding:15px clamp(24px,5vw,80px)}
+.sales-page .public-brand img{width:58px;height:48px}
+.sales-page .sim-desktop-nav{gap:30px;font-size:12px;letter-spacing:.015em}
+.sales-page .pub-btn{border-radius:3px;background:#c0a477;border-color:#c0a477;min-height:54px;font-size:11px;letter-spacing:.11em;font-weight:600;box-shadow:inset 0 1px 0 #f1e4cb55}
+.sales-page .pub-btn:hover{background:#dac39b;border-color:#dac39b}
+.sales-page .pub-btn.secondary{background:none;box-shadow:none;border-color:#81735a}
+.sim-hero{max-width:1440px;grid-template-columns:1.12fr 1fr;gap:30px;padding:36px clamp(24px,5vw,80px) 54px;border:0;align-items:center;isolation:isolate;background:radial-gradient(ellipse at 75% 45%,#b49a6b12,transparent 55%)}
+.sim-hero-copy{padding:24px 0 54px;align-self:center}
+.sales-page .sim-hero h1{font-size:clamp(54px,5.2vw,76px);line-height:.99;letter-spacing:-.035em;margin:24px 0 28px;max-width:680px;text-wrap:balance}
+.sales-page .sim-hero h1 em{color:#c7af84}
+.sim-hero-copy>p:not(.pub-kicker){font-size:15px;line-height:1.8;max-width:480px}
+.sim-hero-copy .sim-manifesto{font-size:25px!important;line-height:1.25!important;margin:22px 0 30px}
+.sim-hero-photo{width:100%;max-width:480px;justify-self:end;align-self:center;border:1px solid #c3b39628;background:#141414;box-shadow:0 30px 70px #0008;overflow:hidden}
+.sim-hero-photo .hero-portrait-image{display:block;width:100%;height:auto;max-height:none;object-fit:contain;object-position:center;filter:none}
+.sim-hero-photo::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(0deg,#10101055,transparent 24%);box-shadow:inset 0 0 0 1px #ffffff09}
+.sim-hero-signature{bottom:25px;left:clamp(24px,5vw,80px);font-size:9px;color:#a79c88;letter-spacing:.26em}
+.sim-section{padding:90px max(28px,calc((100vw - 1240px)/2));border-bottom-color:#ffffff12}
+.sim-section h2{font-size:clamp(44px,4.6vw,68px);line-height:1.02;letter-spacing:-.025em;text-wrap:balance}
+.sim-two-columns h2{font-size:clamp(42px,4vw,60px)}
+.sim-section p{font-size:15px;line-height:1.8}
+.sales-page .pub-kicker{font-size:10px;letter-spacing:.21em}
+.sim-ivory{background:#f5f3ee}
+.sales-page .sim-ivory em{color:#76613e}
+.sim-marker-grid{grid-template-columns:repeat(7,minmax(0,1fr));gap:0;margin:48px 0 26px}
+.sim-marker-grid article{min-height:215px;padding:10px 17px 20px;border:0;border-left:1px solid #ffffff18;background:none}
+.sim-marker-grid article:first-child{border-left:0;padding-left:0}
+.sim-gold-icon{width:42px;height:42px;margin:0 0 22px;filter:none;opacity:.94}
+.sim-marker-grid .sim-index{display:none}
+.sim-marker-grid h3{font-size:15px;letter-spacing:.01em;margin:20px 0 10px}
+.sim-marker-grid p{font-size:12px;line-height:1.7;color:#b9b7b1}
+.sim-method-list{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:24px;margin-top:44px}
+.sim-method-list li{display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding:24px 0;border-top:1px solid #b9af9b}
+.sim-method-list li>span{font:48px 'SIM Editorial',Georgia,serif;color:#91816a}
+.sim-method-list h3{font-size:30px;margin:4px 0 0}
+.sim-method-list p{font-size:13px;margin:0}
+.sim-experience .sim-two-columns{grid-template-columns:.8fr 1.35fr;gap:45px;align-items:center}
+.sim-device-stage{padding:25px 45px 40px 0;min-height:0;perspective:none;background:radial-gradient(ellipse at 55% 70%,#c2b08b1b,transparent 68%)}
+.sim-tablet{width:96%;padding:9px;border-radius:20px;border:1px solid #88847d;background:linear-gradient(145deg,#6d6d69,#111 8%,#060606 90%,#5b5a56);box-shadow:0 35px 60px #0009,inset 0 0 0 2px #151515;transform:none}
+.sim-tablet img{border-radius:11px}
+.sim-phone{width:29%;right:0;bottom:0;padding:5px;border-radius:20px;border-color:#85837d;background:linear-gradient(145deg,#828079,#111 9%,#050505 89%,#67655e);box-shadow:0 20px 35px #000b;transform:none}
+.sim-phone img{border-radius:15px}
+.sim-device-scene figcaption{margin-top:24px;font-size:11px;color:#bdb9b0}
+.sim-founder{max-width:1440px;margin:auto;grid-template-columns:.8fr 1.2fr;gap:80px;align-items:center}
+.sim-founder figure{max-width:420px;margin:0}
+.sim-founder img{width:100%;height:auto;max-height:none;object-fit:contain;filter:none}
+.sim-founder h2{font-size:clamp(62px,6vw,92px)}
+.sim-faq-list{max-width:100%}
+.sim-faq-list summary{font-size:16px}
+@media(min-width:1800px){.sim-hero{padding-top:60px;padding-bottom:80px}.sim-hero-signature{bottom:32px}}
+@media(max-width:1100px){.sim-hero{gap:26px;padding-top:30px}.sales-page .sim-hero h1{font-size:58px}.sim-marker-grid{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:25px}.sim-marker-grid article:nth-child(5){border-left:0;padding-left:0}.sim-method-list{gap:15px}.sim-method-list h3{font-size:26px}.sim-experience .sim-two-columns{gap:30px}}
+@media(max-width:760px){
+ .sales-page .sim-nav{height:78px;padding:13px 24px}.sales-page .sim-mobile-menu nav{top:77px}
+ .sim-hero{display:grid;grid-template-columns:1fr;gap:0;padding:12px 24px 30px}
+ .sim-hero-photo{grid-row:1;width:100%;max-width:390px;justify-self:center;aspect-ratio:1.15;overflow:hidden;box-shadow:0 20px 35px #0007}
+ .sim-hero-photo .hero-portrait-image{height:100%;object-fit:cover;object-position:50% 0%}
+ .sim-hero-copy{grid-row:2;padding:30px 0 0}.sales-page .sim-hero h1{font-size:clamp(42px,11.6vw,58px);line-height:1.02;margin:19px 0 23px;text-wrap:initial}
+ .sim-hero-copy .pub-kicker{font-size:9px;letter-spacing:.15em}.sim-hero-copy>p:not(.pub-kicker){font-size:14px;line-height:1.8}.sim-hero-copy .sim-manifesto{font-size:24px!important;margin:24px 0}.sim-hero-signature{position:static;grid-row:3;margin:27px 0 0;font-size:8px;letter-spacing:.16em}
+ .sim-section{padding:65px 24px}.sim-section h2,.sim-two-columns h2{font-size:42px;line-height:1.06;margin-bottom:25px}
+ .sim-two-columns,.sim-experience .sim-two-columns{grid-template-columns:1fr;gap:28px}
+ .sim-marker-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 0;margin:32px 0 22px}.sim-marker-grid article{min-height:195px;padding:8px 18px 18px}.sim-marker-grid article:nth-child(odd){border-left:0;padding-left:0}.sim-marker-grid h3{font-size:17px}.sim-marker-grid p{font-size:13px}
+ .sim-method-list{grid-template-columns:1fr;gap:0}.sim-method-list li{display:grid;grid-template-columns:48px 1fr;gap:8px 20px;padding:23px 0}.sim-method-list li>span{font-size:36px;grid-row:span 2}.sim-method-list h3{font-size:30px}.sim-method-list p{grid-column:2;font-size:14px}
+ .sim-device-stage{margin-top:12px;padding:18px 26px 30px 0}.sim-tablet{padding:5px;border-radius:12px}.sim-tablet img{border-radius:7px}.sim-phone{width:31%;padding:3px;border-radius:13px;right:0;bottom:0}.sim-phone img{border-radius:9px}.sim-device-scene figcaption{font-size:11px;margin-top:20px}
+ .sim-founder{grid-template-columns:1fr;gap:36px}.sim-founder figure{max-width:360px;margin:auto}.sim-founder h2{font-size:64px}.sim-faq-list summary{font-size:15px}.sim-final{padding-top:65px}
+}
+@media(max-width:360px){.sim-hero{padding-left:20px;padding-right:20px}.sales-page .sim-hero h1{font-size:41px}.sim-section{padding-left:20px;padding-right:20px}.sim-section h2,.sim-two-columns h2{font-size:38px}.sim-hero-photo{aspect-ratio:1.08}}

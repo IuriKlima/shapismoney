@@ -39,7 +39,8 @@ test('direct GET, refresh and HEAD serve app/login/local identically and preserv
    const head=await raw(origin+route,{method:'HEAD',headers:gmail});assert.equal(head.status,200);assert.equal(head.text,'');
   }
   for(const route of ['/','/vendas','/radar']){const page=await raw(origin+route,{headers:gmail});assert.equal(page.status,200);assert.match(page.text,/id="public-app"/);assert.doesNotMatch(page.text,/id="local-app"/);}
-  for(const asset of ['platform-tablet-demo.jpg','platform-phone-demo.jpg']){const image=await raw(origin+'/sim/assets/'+asset,{headers:{'sec-fetch-site':'same-origin'}});assert.equal(image.status,200);assert.equal(image.headers['content-type'],'image/jpeg');assert.ok(image.text.length>1000);}
+  for(const asset of ['platform-tablet-demo.jpg','platform-phone-demo.jpg','platform-tablet-hd.jpg','platform-tablet-crisp.jpg','platform-phone-hd.jpg','bruno-original-667.jpg','bruno-original-400.jpg']){const image=await raw(origin+'/sim/assets/'+asset,{headers:{'sec-fetch-site':'same-origin'}});assert.equal(image.status,200);assert.equal(image.headers['content-type'],'image/jpeg');assert.ok(image.text.length>1000);}
+  const font=await raw(origin+'/sim/assets/cormorant-garamond-latin.woff2',{headers:{'sec-fetch-site':'same-origin'}});assert.equal(font.status,200);assert.equal(font.headers['content-type'],'font/woff2');
  }finally{await app.close();rmSync(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });
 
@@ -72,5 +73,6 @@ test('HTTP Gmail→public password page succeeds, fragment never reaches request
   assert.equal((await fetch(origin+'/api/local/students',{headers:{Origin:origin,'Sec-Fetch-Site':'same-origin'}})).status,401);
   assert.equal((await fetch(origin+'/sim/persistent.js',{headers:{'Sec-Fetch-Site':'same-origin'}})).status,200);
   assert.equal((await fetch(origin+'/local',{headers:{'Sec-Fetch-Site':'cross-site'}})).status,403);
+  const font=await raw(origin+'/sim/assets/cormorant-garamond-latin.woff2',{headers:{'sec-fetch-site':'same-origin'}});assert.equal(font.status,200);assert.equal(font.headers['content-type'],'font/woff2');
  }finally{await app.close();rmSync(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });
