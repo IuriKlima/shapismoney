@@ -23,6 +23,7 @@ export async function createLocalServer({filename,store:provided,security=localS
   const server=http.createServer({requestTimeout:10000,headersTimeout:10000},async(req,res)=>{
     const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Referrer-Policy':'no-referrer'};
     for(const [key,value] of Object.entries(headers))res.setHeader(key,value);
+    if(await api.handleAsaasWebhook(req,res))return;
     let url;try{url=new URL(req.url,'http://127.0.0.1');assertRequest(req,security,{health:url.pathname==='/healthz'});}catch{res.writeHead(403,{'Content-Type':'application/json'});return res.end('{"error":"Origem ou proxy inválido."}');}
     if(security.production)res.setHeader('Strict-Transport-Security','max-age=31536000');
     if(url.pathname==='/healthz'&&req.method==='GET'){try{await serviceStore.get('SELECT 1 AS ok');res.writeHead(200,{'Content-Type':'application/json'});return res.end('{"ready":true}');}catch{res.writeHead(503);return res.end('{"ready":false}');}}
@@ -34,7 +35,7 @@ export async function createLocalServer({filename,store:provided,security=localS
     const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp','.jpg':'image/jpeg','.woff2':'font/woff2'};
     try{let body=readFileSync(path.join(root,name));if(security.production&&name==='persistent.html')body=Buffer.from(body.toString().replace('Fatia local persistente · somente dados fictícios · convites com entrega manual; sem pagamentos ou uploads. Este fluxo usa sessões e banco no servidor, separado da demonstração.','Acompanhamento com acesso individual. Propostas de treino exigem aprovação profissional; pagamentos e uploads ainda indisponíveis.'));res.writeHead(200,{'Content-Type':types[path.extname(name)]});res.end(req.method==='HEAD'?undefined:body);}catch{res.writeHead(500);res.end('Recurso indisponível.');}
   });
-  return {server,store,flushDraftJobs:()=>api.flushDraftJobs?.(),flushAccessEmail:()=>api.flushAccessEmail?.(),flushProtocolEmail:()=>api.flushProtocolEmail?.(),close:async()=>{await api.close?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await serviceStore.close();}};
+  return {server,store,flushAsaas:()=>api.flushAsaas?.(),flushDraftJobs:()=>api.flushDraftJobs?.(),flushAccessEmail:()=>api.flushAccessEmail?.(),flushProtocolEmail:()=>api.flushProtocolEmail?.(),close:async()=>{await api.close?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await serviceStore.close();}};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   let app;

@@ -23,7 +23,7 @@ export function assertRequest(req,security,{health=false}={}){
   const publicNavigation=['GET','HEAD'].includes(req.method)&&['/','/app','/login','/local','/radar','/vendas','/privacidade'].includes(entry)&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
   if(req.headers['sec-fetch-site']==='cross-site'&&!publicNavigation)fail('Requisição externa bloqueada.');
   let origin;
-  if(security.production){
+  if(security.production||security.sandbox){
     const normalized=peer?.startsWith('::ffff:')?peer.slice(7):peer;
     const canonicalHost=req.headers.host===security.host;
     const forwardedHost=Boolean(security.upstreamHost)&&req.headers.host===security.upstreamHost&&req.headers['x-forwarded-host']===security.host;
@@ -36,4 +36,7 @@ export function assertRequest(req,security,{health=false}={}){
   if(!local||!['127.0.0.1','localhost'].includes(host.hostname)||req.headers.host!==host.host)fail('Somente loopback.');
   origin='http://'+host.host;if((req.method!=='GET'&&!publicNavigation||publicNavigation&&req.headers.origin!==undefined)&&req.headers.origin!==origin)fail('Origem inválida.');return {clientIP:peer};
 }
-export const cookieHeader=(security,token,maxAge)=>security.cookieName+'='+token+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+maxAge+(security.production?'; Secure':'');
+export const cookieHeader=(security,token,maxAge)=>security.cookieName+'='+token+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+maxAge+(security.production||security.sandbox?'; Secure':'');
+
+// Dedicated non-production sandbox uses the same HTTPS/proxy validation.
+export function sandboxSecurity(env){const base=productionSecurity({...env,SIM_DEPLOYMENT_STAGE:'staging'});if(['shapeismoney.com.br','www.shapeismoney.com.br'].includes(new URL(base.origin).hostname))throw Error('Production domain forbidden for sandbox.');return {...base,production:false,sandbox:true};}

@@ -1,3 +1,4 @@
+import {asaasRuntime} from './commerce/asaas-runtime.mjs';
 import {draftJobFlow} from './draft-jobs.mjs';
 import {protocolNotificationFlow} from './protocol-notifications.mjs';
 import {commerceRuntime} from './commerce/runtime.mjs';
@@ -28,10 +29,10 @@ const text=(value,min,max)=>{if(typeof value!=='string'||value.trim().length<min
 const email=value=>{const v=text(value,3,254).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))deny(400,'E-mail inválido.');return v;};
 const publicUser=u=>({id:u.id,name:u.name,email:u.email,role:u.role});
 const publicPlan=p=>({id:p.id,title:p.title,content:publicTrainingContent(JSON.parse(p.content)),status:p.status,revision:p.revision});
-export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={},protocolEmail={},draftJobs={},radarOrgId,commerce={}}={}){
+export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1000,loginLimit=8,security=localSecurity(),chat={},trainingProposals={},nutritionProposals={},trainingVideos={},accessEmail={},protocolEmail={},draftJobs={},radarOrgId,commerce={},asaas={}}={}){
   const dummy=await hashPassword(newToken());
   const audit=async(actor,student,event)=>await store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actor.org_id,actor.id,student,event,now());
-  let commercial=null;const access=accessPolicy({store,now,deny,audit,commerceState:row=>commercial?.accessState(row)});
+  let commercial=null,asaasCommerce=null;const access=accessPolicy({store,now,deny,audit,commerceState:row=>commercial?.accessState(row),managedCommerceState:row=>asaasCommerce?.accessState(row)});
   const userDTO=async u=>({...publicUser(u),...(u.role==='student'?{access:await access.userSummary(u)}:{})});
   async function session(req){
     const match=new RegExp('(?:^|;\\s*)'+security.cookieName+'=([A-Za-z0-9_-]{43})(?:;|$)').exec(req.headers.cookie||'');
@@ -94,16 +95,18 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
   const trainingSafetyFlow=trainingSafety({store,now,deny,exact,text,read,mutation,student,audit,externalEnabled:()=>!security.production&&trainingProposals.enabled===true&&trainingProposals.externalGate===true&&trainingProposals.mode==='external-reviewed'});
   const trainingProposal=trainingProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,safety:trainingSafetyFlow,security,configuration:trainingProposals,budgetConfiguration:trainingProposals.mode==='external-reviewed'?trainingProposals.budget||{}:chat});
   const chatFlow=aiChatFlow({store,now,deny,exact,text,read,mutation,student,audit,studentWork,planWork,budget,configuration:chat});
-  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit,proposalGuard:(actor,plan)=>nutritionProposal.assertPlanApproval(actor,plan),published:async(actor,plan)=>notices.queueLocked(actor,await student(actor,plan.student_id),{kind:'nutrition',planId:plan.id})});
+  const nutrition=nutritionFlow({store,now,deny,exact,text,read,mutation,student:async(actor,id)=>{const row=await student(actor,id);if(actor.role==='student')await access.assertActive(row,'nutrition');return row;},audit,proposalGuard:(actor,plan)=>nutritionProposal.assertPlanApproval(actor,plan),published:async(actor,plan)=>{const row=await student(actor,plan.student_id);await asaasCommerce?.publishedLocked(actor,row,plan.id,'nutrition');return notices.queueLocked(actor,row,{kind:'nutrition',planId:plan.id});}});
   const nutritionProposal=nutritionProposalFlow({store,now,deny,exact,text,read,mutation,student,audit,security,nutrition,assertNutritionAccess:row=>access.assertActive(row,'nutrition'),configuration:nutritionProposals});
   const drafts=draftJobFlow({store,now,deny,exact,text,read,mutation,student,audit,policy:access,security,engines:{training:trainingProposal.job,nutrition:nutritionProposal.job},configuration:draftJobs});
   const supervision=supervisionFlow({store,now,deny,exact,text,read,mutation,student,audit,serviceSnapshot:sla.snapshot});
   const videoFlow=trainingVideoFlow({store,now,deny,student,access,security,configuration:trainingVideos,methodology:trainingProposals.methodology,exact,text,read,mutation,audit});
   const execution=executionFlow({store,now,audit,deny,exact,text,read,mutation,student});
-  const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate:async row=>{await access.assertActive(row);}});
+  const invites=invitationFlow({store,now,audit,deny,exact,email,text,read,mutation,student,canActivate:async row=>{if(await asaasCommerce?.allowsInvitedIdentity(row))return;await access.assertActive(row);}});
   const radar=radarFlow({store,now,deny,exact,text,email,read,security,orgId:radarOrgId});
   const profiles=profileFlow({store,deny,exact,text,read,student,mutation,audit});
+  if(commerce.enabled&&asaas.enabled)deny(503,'Selecione apenas um adapter comercial.');
   commercial=await commerceRuntime({store,security,session,now,read,configuration:commerce});
+  asaasCommerce=await asaasRuntime({store,security,session,now,read,intakeState:intake.state,configuration:asaas});
   const handle=async function handle(req,res){
     const send=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
     try{
@@ -130,6 +133,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       if(commercePublic&&!commercePublic.forwardPasswordBody){if(commercePublic.buyerCookie)res.setHeader('Set-Cookie',[commercePublic.buyerCookie,...(commercePublic.clearSession?[cookieHeader(security,'',0)]:[])]);return send(commercePublic.status,commercePublic.data);}
       const passwordResult=await passwordAccess.handlePublic(req,connection,route,commercePublic?.forwardPasswordBody);if(passwordResult){if(passwordResult.clearSession)res.setHeader('Set-Cookie',cookieHeader(security,'',0));return send(passwordResult.status,passwordResult.data);}
       const auth=await session(req);if(!auth)deny(401,'Entre para continuar.');const actor=auth.user;
+      const asaasResult=await asaasCommerce?.handle(req,route);if(asaasResult)return send(asaasResult.status,asaasResult.data);
       const profileResult=await profiles.handle(actor,req,res,route);if(profileResult){if(profileResult.binary)return;return send(profileResult.status,profileResult.data);}
       const radarCRM=await radar.privateRoute(actor,req,route);if(radarCRM)return send(radarCRM.status,radarCRM.data);
       const commerceAdmin=await commercial?.handleAdmin(req,route);if(commerceAdmin)return send(commerceAdmin.status,commerceAdmin.data);
@@ -202,7 +206,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
           else if(action==='publish'){if(!current.approved_by||current.approved_revision!==current.revision-1)deny(409,'Aprovação desatualizada.');updated=await store.run("UPDATE plans SET status='published',published_at=?,revision=revision+1 WHERE id=? AND revision=? AND status=?",now(),plan.id,body.revision,required);}
           else updated=await store.run("UPDATE plans SET status='review',revision=revision+1 WHERE id=? AND revision=? AND status=?",plan.id,body.revision,required);
           if(updated.changes!==1)deny(409,'Plano mudou. Recarregue.');
-          if(action==='publish'){await videoFlow.snapshot(actor,current,row);await notices.queueLocked(actor,await student(actor,row.id),{kind:'training',planId:plan.id});}
+          if(action==='publish'){await asaasCommerce?.publishedLocked(actor,row,plan.id);await videoFlow.snapshot(actor,current,row);await notices.queueLocked(actor,await student(actor,row.id),{kind:'training',planId:plan.id});}
             await audit(actor,row.id,'plan.'+action);return {status:200,data:{plan:publicPlan(await store.get('SELECT * FROM plans WHERE id=?',plan.id))}};});return send(result.status,result.data);
       }
       if(route==='/api/local/audit'&&req.method==='GET'){
@@ -213,5 +217,6 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
       deny(404,'Recurso não encontrado. Uploads ainda indisponíveis.');
     }catch(error){const code=error instanceof Failure||error.safe===true?error.status:['23505','SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)?409:500;send(code,{error:error instanceof Failure||error.safe===true?error.message:code===409?'Este cadastro ou operação já existe.':'Não foi possível concluir a operação.'});}
   };
+  handle.handleAsaasWebhook=(req,res)=>asaasCommerce?.handleWebhook(req,res)||false;handle.flushAsaas=()=>asaasCommerce?.processBatch();
   handle.flushDraftJobs=()=>drafts.flush();handle.flushAccessEmail=()=>passwordAccess.flush();handle.flushProtocolEmail=()=>notices.flush();handle.close=async()=>{chatFlow.close();trainingProposal.close();await passwordAccess.close();await notices.close();await drafts.close();};return handle;
 }
