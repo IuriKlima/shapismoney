@@ -1,0 +1,27 @@
+# Editorial home review — 2026-10-12
+
+Base and rollback: `63b365b6f8f4924857edbfbae518467eca3370d7`.
+
+## Scope
+
+Eleven editorial sections, black/ivory palette, serif headlines, matte gold, authentic Bruno portrait, metallic relief SVG icons and tablet/phone composition. Primary CTAs lead to `/radar`; plans retain prices and interest capture. `/` and `/vendas` share home metadata with canonical root. `/radar`, `/privacidade`, `/app`, `/login`, `/local`, authentication and integrations remain intact.
+
+## Reference and truthful content
+
+Visual reference inspected in pixels: `C:\Users\User\Documents\Brunão\WhatsApp Image 2026-10-12 at 17.03.48.jpeg`. All five original photo files were also inspected. The seated monochrome portrait matches the previously confirmed production derivative; provenance remains in `bruno-portrait-assets.json`.
+
+The seven markers are explicitly illustrative. No invented trends, score, clinical validation, testimonial, result, qualification, automatic monitoring or 17-photo feature is advertised. The original reference contains aspirational UI and claims; these are not presented as delivered functionality.
+
+## Device screen provenance
+
+`platform-tablet-demo.jpg` and `platform-phone-demo.jpg` are screenshots of the actual `persistent.js` UI, rendered by the actual backend in an isolated temporary SQLite fixture. Only fictional user `Aluno demonstrativo` and a synthetic `Treino demonstrativo` were used. No production records, personal data or credentials appear. Screens illustrate the implemented home and published training views; fixture prescriptions are not recommendations. Total JPEG payload approximately 91 KB; images lazy-load. Device depth and metallic icons use CSS/SVG without video, canvas, animation or extra libraries.
+
+## Verification
+
+- 11 focused home/routing tests pass locally with real temporary SQLite and a loader that stubs unused sharp/pg imports. Same-origin mockup assets return JPEG/200. Production dependency validation remains a release step.
+- Browser inspected desktop 1280px and mobile 390px/320px, hero, markers, actual mockups and FAQ. No horizontal overflow or broken loaded images at those checked widths.
+- Mobile menu opens/closes; selecting an anchor closes it and navigates correctly. FAQ expands. Capture cancellation, recoverable failure, synthetic successful submission, focus and return-to-plans verified. Fixed same-document return after capture/confirmation and narrow-header overflow.
+- Reduced-motion styles disable smooth scrolling/transitions for this home. Native links/details, descriptive image alternatives, single h1 and skip link retained. No blanket accessibility or Core Web Vitals certification.
+- Source changes do not modify production data, authentication, AI, billing or integrations. Backend changes only map the new sales document and two public image assets; Dockerfile includes sales.html.
+
+Desktop/mobile screenshots are in the task's `home-qa` directory. Before deployment: publish a separate branch and rollback reference, run focused tests with actual installed dependencies, deploy, confirm health, exact files and public routes.

@@ -9,3 +9,138 @@
 .hero-portrait::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,#11100e,transparent 22%),linear-gradient(0deg,#11100e,transparent 25%)}
 .about-portrait-image{display:block;height:auto}
 @media(max-width:760px){.sales-hero{display:flex;flex-direction:column;min-height:0}.sales-hero .hero-copy{padding-top:32px;padding-bottom:20px;max-width:none}.sales-hero .hero-copy h1{font-size:clamp(44px,13vw,54px);margin:20px 0 24px}.sales-hero .hero-copy .pub-btn.secondary{margin-top:6px}.hero-portrait{min-height:0;width:100%}.hero-portrait-image{position:static;display:block;width:100%;height:auto;object-fit:contain}.hero-portrait::after{background:linear-gradient(0deg,#11100e,transparent 15%),linear-gradient(180deg,#11100e,transparent 10%)}.sales-hero .hero-bottom{position:relative;inset:auto;display:block;padding:18px 24px 24px}}
+
+/* Sales-only editorial system. Radar and authenticated views retain their styles. */
+.sales-page{--sim-black:#101010;--sim-ivory:#f5f3ee;--sim-gold:#ad8a50;--sim-graphite:#343434;background:var(--sim-black);color:var(--sim-ivory);font-family:Arial,Helvetica,sans-serif}
+.sales-page p{color:#c6c3bc}
+.sales-page h1,.sales-page h2,.sales-page .sim-statement,.sales-page .sim-manifesto{font-family:Georgia,'Times New Roman',serif;font-weight:400}
+.sales-page em{color:var(--sim-gold);font-style:normal}
+.sales-page .pub-kicker{color:var(--sim-gold);font-size:11px;letter-spacing:.17em;font-weight:600;line-height:1.7}
+.sales-page a:focus-visible,.sales-page button:focus-visible,.sales-page summary:focus-visible{outline:3px solid #d7b47b;outline-offset:5px}
+.sim-skip-link{position:absolute;left:16px;top:0;transform:translateY(-150%);z-index:20;padding:14px 20px;background:var(--sim-ivory);color:var(--sim-black)}
+.sim-skip-link:focus{transform:translateY(10px)}
+.sales-page .sim-nav{height:98px;padding:18px max(24px,5vw);gap:32px;border-color:#343434}
+.sales-page .public-brand img{width:67px;height:55px}
+.sales-page .sim-desktop-nav{gap:25px;margin-left:auto;font-size:12px}
+.sales-page .pub-btn{background:var(--sim-gold);color:#101010;border-color:var(--sim-gold);border-radius:0;min-height:54px;font-size:11px;letter-spacing:.08em;padding:16px 23px;gap:16px}
+.sales-page .pub-btn:hover{background:#c8a76f;border-color:#c8a76f}
+.sales-page .pub-btn.secondary{background:transparent;color:var(--sim-ivory);border-color:#81704f}
+.sales-page .pub-btn.secondary:hover{background:#24221d}
+.sales-page .sim-nav-cta{min-height:46px;padding:11px 17px;font-size:10px;white-space:nowrap}
+.sim-mobile-menu{display:none}
+.sim-editorial{overflow-wrap:break-word}
+.sim-editorial [id]{scroll-margin-top:28px}
+.sim-hero{display:grid;grid-template-columns:1.2fr 1fr;position:relative;max-width:1600px;margin:0 auto;border-bottom:1px solid #343434}
+.sim-hero-copy{padding:78px 42px 100px max(24px,7vw);position:relative;z-index:1;align-self:center}
+.sales-page .sim-hero h1{font-size:clamp(44px,4.3vw,68px);line-height:1.08;letter-spacing:-.04em;margin:24px 0 28px;max-width:750px}
+.sim-hero-copy>p:not(.pub-kicker){max-width:550px;font-size:15px;line-height:1.85}
+.sim-hero-copy .sim-manifesto{font-size:21px!important;line-height:1.5!important;color:var(--sim-ivory);margin:25px 0}
+.sim-hero-copy .hero-note{font-size:11px!important;line-height:1.7!important;max-width:385px;margin:14px 0 0}
+.sim-hero-photo{margin:0;align-self:stretch;min-width:0;position:relative;background:#101010}
+.sim-hero-photo .hero-portrait-image{position:static;display:block;width:100%;height:100%;object-fit:cover;object-position:50% 35%}
+.sim-hero-signature{position:absolute;bottom:25px;left:7vw;letter-spacing:.2em;font-size:9px;text-transform:uppercase}
+.sim-brand-panel{display:grid;place-items:center;padding:50px;font:38px Georgia,serif;color:var(--sim-gold)}
+.sim-section{padding:104px max(24px,7vw);border-bottom:1px solid #343434}
+.sim-section>.pub-kicker{margin:0 0 24px}
+.sim-section h2{font-size:clamp(38px,4.1vw,62px);line-height:1.13;letter-spacing:-.035em;margin:0 0 35px;max-width:950px}
+.sim-section p{font-size:15px;line-height:1.9}
+.sim-section .sim-lead{max-width:660px;margin:0 0 40px}
+.sim-two-columns{display:grid;grid-template-columns:1.2fr 1fr;gap:clamp(40px,7vw,110px);align-items:start}
+.sim-two-columns p:first-child{margin-top:0}
+.sim-two-columns h2{font-size:clamp(34px,3.5vw,53px);margin:0}
+.sales-page .sim-statement{font-size:25px;line-height:1.5;color:var(--sim-ivory);margin-top:30px}
+.sim-ivory{background:var(--sim-ivory);color:var(--sim-black);border-color:#d1cbbf}
+.sales-page .sim-ivory p{color:#49463f}
+.sales-page .sim-ivory em,.sales-page .sim-ivory .pub-kicker,.sales-page .sim-ivory .sim-index{color:#786035}
+.sales-page .sim-ivory .sim-statement{color:#101010}
+.sim-capital .sim-two-columns{align-items:center}
+.sim-philosophy h2{max-width:780px}
+.sim-philosophy .sim-two-columns{grid-template-columns:1fr 1fr;max-width:1080px}
+.sim-marker-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:40px 0 22px}
+.sim-marker-grid article{padding:28px 24px;border:1px solid #3b3934;min-height:190px;background:#151515}
+.sim-index{font:20px Georgia,serif;color:var(--sim-gold)}
+.sim-marker-grid h3{font-size:19px;margin:23px 0 8px;font-weight:400}
+.sim-marker-grid p{font-size:13px;margin:0;line-height:1.7}
+.sales-page .sim-editorial .form-note{font-size:12px;line-height:1.8;max-width:800px;color:#aaa69f}
+.sales-page .sim-ivory .form-note{color:#615b50}
+.sim-method-list{list-style:none;margin:46px 0 0;padding:0}
+.sim-method-list li{display:grid;grid-template-columns:70px 1fr 1.4fr;gap:30px;align-items:center;border-top:1px solid #c9c2b5;padding:24px 0}
+.sim-method-list h3{font:29px Georgia,serif;margin:0}
+.sim-method-list p{margin:0;font-size:14px}
+.sim-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));list-style:none;gap:30px;margin:46px 0;padding:0}
+.sim-steps li{border-top:1px solid #716044;padding-top:25px}
+.sim-steps span{font:27px Georgia,serif;color:var(--sim-gold)}
+.sim-steps h3{font-size:17px;font-weight:400;margin:20px 0 10px}
+.sim-steps p{font-size:13px;line-height:1.8}
+.sim-experience{background:#171717}
+.sim-experience .sim-two-columns{grid-template-columns:1.15fr 1fr;align-items:center}
+.sim-checklist,.sim-audience-list{list-style:none;padding:0;margin:28px 0}
+.sim-checklist li{border-bottom:1px solid #3a3833;padding:15px 0;font-size:14px;display:flex;gap:14px}
+.sim-checklist li::before{content:'↗';color:var(--sim-gold)}
+.sim-experience-card{padding:48px;border:1px solid #5d513b;background:#101010;max-width:490px}
+.sim-experience-card h3{font:38px/1.22 Georgia,serif;letter-spacing:-.025em;margin:32px 0}
+.sim-experience-card p{font-size:14px}
+.sales-page .text-link{display:inline-flex;align-items:center;min-height:48px;color:#d6b982;font-size:13px;text-decoration:underline;text-underline-offset:5px}
+.sim-plans{margin-top:75px;padding-top:40px;border-top:1px solid #343434}
+.sim-plans>h3{font:30px Georgia,serif}
+.sim-plans .plans-grid{margin-top:30px;gap:16px}
+.sim-plans .public-plan{padding:28px;background:#101010;border-color:#3b3934}
+.sim-plans h4{margin:0;font-size:16px;font-weight:400}
+.sim-plans .price{font-size:36px;line-height:1.3;color:var(--sim-ivory)}
+.sim-plans .price small{font-size:16px}
+.sim-plans .pub-btn{width:100%;font-size:10px}
+.sim-results-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:35px;margin:42px 0}
+.sim-results-grid article{border-top:1px solid #a8987d;padding-top:15px}
+.sim-results-grid h3{font:26px Georgia,serif}
+.sim-results-grid p{font-size:14px}
+.sim-founder{display:grid;grid-template-columns:1fr 1.05fr;gap:9vw;align-items:center}
+.sim-founder figure{margin:0;max-width:490px}
+.sim-founder img{width:100%;height:auto}
+.sim-founder figcaption{font-size:10px;letter-spacing:.09em;color:#b1aaa0;margin-top:15px}
+.sim-founder .sim-manifesto{font-size:27px;line-height:1.5;color:var(--sim-gold);margin-top:36px}
+.sim-audience{background:#1c1c1c}
+.sim-audience-list{max-width:850px}
+.sim-audience-list li{padding:20px 0;border-top:1px solid #3b3934;font-size:15px}
+.sim-faq-list{max-width:900px;margin-top:45px}
+.sim-faq-list details{border-top:1px solid #4b4439}
+.sim-faq-list details:last-child{border-bottom:1px solid #4b4439}
+.sim-faq-list summary{min-height:72px;padding:23px 30px 23px 0;cursor:pointer;font-size:15px;line-height:1.6;list-style:none;position:relative}
+.sim-faq-list summary::-webkit-details-marker{display:none}
+.sim-faq-list summary::after{content:'+';position:absolute;right:2px;top:21px;color:var(--sim-gold);font-size:22px}
+.sim-faq-list details[open] summary::after{content:'−'}
+.sim-faq-list details p{font-size:14px;padding:0 35px 25px 0;margin:0;max-width:780px}
+.sim-faq-list details a{text-decoration:underline;text-underline-offset:4px}
+.sim-final{text-align:center;padding:115px 0 15px;max-width:800px;margin:0 auto}
+.sim-final h2{margin:25px 0}
+.sim-final>p{max-width:570px;margin:20px auto}
+.sim-final .hero-note{font-size:12px}
+.sales-page .public-footer{border-top:1px solid #343434;background:#101010}
+.sales-page .public-footer small{color:#aaa69f}
+@media(min-width:1600px){.sim-hero-copy{padding-left:112px}.sim-hero-signature{left:112px}}
+@media(max-width:1100px){.sales-page .sim-nav{gap:20px}.sales-page .sim-desktop-nav{gap:17px}.sales-page .sim-nav .sim-nav-cta{display:none}.sim-marker-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.sim-hero-copy{padding-top:55px;padding-bottom:85px}.sales-page .sim-hero h1{font-size:46px}.sim-two-columns{gap:40px}.sim-experience-card{padding:32px}.sim-steps{gap:20px}}
+@media(max-width:760px){
+ .sales-page .sim-nav{height:82px;padding:14px 22px}.sales-page .public-brand img{width:58px;height:48px}.sales-page .sim-desktop-nav{display:none}
+ .sim-mobile-menu{display:block;margin-left:auto}.sim-mobile-menu summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:12px;font-size:13px;list-style:none}.sim-mobile-menu summary::after{content:'+';color:var(--sim-gold);font-size:24px}.sim-mobile-menu[open] summary::after{content:'−'}
+ .sales-page .sim-mobile-menu nav{position:absolute;top:81px;left:0;right:0;padding:20px 24px;background:#171717;border-bottom:1px solid #81704f;display:flex;flex-direction:column;align-items:stretch;gap:4px}.sales-page .sim-mobile-menu nav a{min-height:48px;border-bottom:1px solid #343434}
+ .sim-hero{display:flex;flex-direction:column}.sim-hero-copy{padding:40px 24px 25px}.sales-page .sim-hero h1{font-size:clamp(37px,9.8vw,56px);line-height:1.1;margin:20px 0 25px}.sim-hero-copy>p:not(.pub-kicker){font-size:14px;line-height:1.8}.sim-hero-copy .sim-manifesto{font-size:21px!important}.sim-hero-copy .pub-btn{width:100%;max-width:380px}.sim-hero-photo{width:100%;max-height:580px;overflow:hidden}.sim-hero-photo .hero-portrait-image{height:auto;max-height:580px;object-fit:cover;object-position:50% 25%}.sim-hero-signature{position:static;margin:20px 24px 28px;font-size:9px}
+ .sim-section{padding:65px 24px}.sim-section h2,.sim-two-columns h2{font-size:clamp(34px,8.8vw,45px);line-height:1.15;margin-bottom:25px}.sim-two-columns,.sim-philosophy .sim-two-columns,.sim-experience .sim-two-columns{grid-template-columns:1fr;gap:20px}.sim-section p{font-size:14px}.sim-section>.pub-kicker{margin-bottom:18px}.sales-page .sim-statement{font-size:23px;margin-top:24px}
+ .sim-marker-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:30px}.sim-marker-grid article{padding:21px 17px;min-height:195px}.sim-marker-grid h3{font-size:17px}.sim-marker-grid p{font-size:12px}.sim-section .sim-lead{margin-bottom:28px}.sim-method-list{margin-top:30px}.sim-method-list li{grid-template-columns:34px 1fr;gap:9px 16px;padding:21px 0}.sim-method-list h3{font-size:27px}.sim-method-list p{grid-column:2;font-size:13px}
+ .sim-steps{grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 20px;margin:30px 0}.sim-steps h3{font-size:16px}.sim-steps p{font-size:12px}.sim-diagnosis>.pub-btn{width:100%;gap:10px;padding:15px 14px;font-size:10px}
+ .sim-experience-card{max-width:none;padding:32px 26px;margin-top:10px}.sim-experience-card h3{font-size:34px;margin:22px 0}.sim-plans{margin-top:45px;padding-top:25px}.sim-plans>h3{font-size:27px}.sim-plans .plans-grid{grid-template-columns:1fr}.sim-plans .price{font-size:33px}.sim-results-grid{grid-template-columns:1fr;gap:12px;margin:28px 0}.sim-results-grid h3{font-size:25px;margin:12px 0}.sim-results-grid p{font-size:13px}
+ .sim-founder{grid-template-columns:1fr;gap:38px}.sim-founder figure{max-width:none}.sim-founder img{max-height:550px;object-fit:cover;object-position:50% 22%}.sim-founder h2{font-size:49px}.sim-founder .sim-manifesto{font-size:25px;margin-top:22px}.sim-audience-list li{font-size:14px;padding:18px 0}.sim-faq-list{margin-top:30px}.sim-faq-list summary{font-size:14px;padding-top:20px;padding-bottom:20px}.sim-faq-list details p{font-size:13px;padding-right:15px}.sim-final{padding-top:65px}.sim-final>.pub-btn{width:100%;max-width:380px}.sales-page .public-footer{padding:35px 24px}
+}
+@media(max-width:360px){.sales-page .sim-nav{padding:12px 18px}.sim-hero-copy{padding:34px 18px 23px}.sales-page .sim-hero h1{font-size:35px}.sim-section{padding:55px 18px}.sim-section h2,.sim-two-columns h2{font-size:33px}.sim-marker-grid article{padding:20px 14px}.sim-marker-grid p{font-size:12px}.sim-steps{gap:22px 16px}.sim-steps h3{font-size:15px}.sim-hero-signature{margin-left:18px}.sales-page .pub-btn{font-size:10px;padding-left:15px;padding-right:15px}}
+@media(prefers-reduced-motion:reduce){html:has(body.sales-page){scroll-behavior:auto}.sales-page *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+@media(max-width:360px){.sales-page .sim-nav .sim-nav-cta{display:none}.sales-page .sim-nav .public-brand{flex-shrink:0}.sales-page .sim-mobile-menu{margin-left:auto}}
+.sim-gold-icon{display:block;width:54px;height:54px;margin:0 0 22px;filter:drop-shadow(0 5px 3px #0009)}
+.sim-marker-grid article{background:radial-gradient(ellipse at 20% 0%,#ad8a5012,transparent 70%),#151515;border-top-color:#ad8a5055}
+.sim-marker-grid .sim-index{float:right;margin-top:-65px;color:#a79b84}
+.sim-device-scene{margin:0;min-width:0;align-self:center}
+.sim-device-stage{position:relative;min-height:400px;padding:36px 40px 36px 0;perspective:1200px;background:radial-gradient(ellipse at 48% 65%,#ad8a502c,transparent 65%)}
+.sim-tablet{position:relative;width:96%;padding:10px;border:1px solid #8c8170;border-radius:20px;background:linear-gradient(135deg,#b6ada0 0%,#272726 2%,#090909 55%,#766e62 100%);box-shadow:0 30px 50px #0009,2px 2px 0 #817767,inset 0 0 0 2px #111;transform:rotateY(-7deg) rotateZ(-3deg)}
+.sim-tablet img{width:100%;height:auto;display:block;border-radius:11px}
+.sim-phone{position:absolute;width:30%;right:0;bottom:20px;padding:6px;border:1px solid #a59881;border-radius:23px;background:linear-gradient(125deg,#b9ad96,#111 15%,#080808 85%,#736b5d);box-shadow:0 20px 35px #000c,2px 2px 0 #615b51;transform:rotateZ(6deg)}
+.sim-phone img{width:100%;height:auto;display:block;border-radius:17px}
+.sim-device-scene figcaption{font-size:11px;color:#c6c0b6;line-height:1.7;margin:16px 0 0;max-width:460px}
+@media(min-width:1100px){.sim-experience .sim-two-columns{grid-template-columns:.85fr 1.15fr;gap:65px}.sim-device-stage{min-height:410px;padding-top:55px}}
+@media(max-width:760px){.sim-device-stage{min-height:0;padding:34px 30px 70px 0;margin-top:18px}.sim-tablet{padding:5px;border-radius:12px}.sim-tablet img{border-radius:8px}.sim-phone{width:31%;padding:4px;border-radius:15px;bottom:20px;right:3px}.sim-phone img{border-radius:11px}.sim-gold-icon{width:44px;height:44px;margin-bottom:18px}.sim-marker-grid .sim-index{margin-top:-56px}.sim-device-scene figcaption{font-size:10px}}

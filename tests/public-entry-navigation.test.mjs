@@ -39,6 +39,7 @@ test('direct GET, refresh and HEAD serve app/login/local identically and preserv
    const head=await raw(origin+route,{method:'HEAD',headers:gmail});assert.equal(head.status,200);assert.equal(head.text,'');
   }
   for(const route of ['/','/vendas','/radar']){const page=await raw(origin+route,{headers:gmail});assert.equal(page.status,200);assert.match(page.text,/id="public-app"/);assert.doesNotMatch(page.text,/id="local-app"/);}
+  for(const asset of ['platform-tablet-demo.jpg','platform-phone-demo.jpg']){const image=await raw(origin+'/sim/assets/'+asset,{headers:{'sec-fetch-site':'same-origin'}});assert.equal(image.status,200);assert.equal(image.headers['content-type'],'image/jpeg');assert.ok(image.text.length>1000);}
  }finally{await app.close();rmSync(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });
 
