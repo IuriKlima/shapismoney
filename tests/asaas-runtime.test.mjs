@@ -22,6 +22,7 @@ const prepare=async(f,s)=>{assert.equal((await s.req('asaas/customer',{cpfCnpj:'
 const settle=async(f,a,o)=>{f.payments.set(o.checkout_id,[{id:'pay_'+o.id,customer:o.customer_id,externalReference:o.id,billingType:o.billing_type,value:o.amount_cents/100,status:'RECEIVED'}]);assert.equal(await f.notify(o),200);assert.equal((await a.req('asaas/process',{})).status,200);};
 
 test('sandbox capability catalog comes from approved backend offers and contains no credentials',async()=>fixture(async f=>{
+ for(const path of ['/local','/sim/persistent.js','/sim/commerce-ui.js','/sim/asaas-commerce-ui.js']){const asset=await fetch(f.origin+path);assert.equal(asset.status,200,path);assert.ok((await asset.text()).length>0);}
  const r=await f.client().req('commerce/capabilities');assert.equal(r.status,200);assert.equal(r.data.mode,'asaas-sandbox');assert.deepEqual(r.data.catalog.map(p=>[p.sku,p.amountCents,p.durationMonths]),[['monthly',49900,1],['quarterly',119700,3],['semiannual',179400,6]]);assert.deepEqual(r.data.catalog[0].billingTypes,['PIX','CREDIT_CARD']);assert.ok(!JSON.stringify(r.data).includes(apiKey));assert.ok(!JSON.stringify(r.data).includes(webhookToken));assert.equal(f.calls.length,0);
  assert.equal((await f.client().req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).status,401);
  await f.restart(true);const disabled=(await f.client().req('commerce/capabilities')).data;assert.equal(disabled.enabled,false);assert.equal(disabled.mode,undefined);
