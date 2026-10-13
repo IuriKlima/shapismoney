@@ -128,6 +128,7 @@ export async function createLocalService({store,now=Date.now,sessionMs=8*60*60*1
         res.setHeader('Set-Cookie',cookieHeader(security,token,Math.floor(sessionMs/1000)));return send(200,{user:await userDTO(authenticated)});
       }
       if(route==='/api/local/activate'&&req.method==='POST'){const result=await invites.activate(req,connection);return send(result.status,result.data);}
+      if(route==='/api/local/commerce/capabilities'&&asaasCommerce&&req.method==='GET')return send(200,asaasCommerce.capabilities());
       if(route==='/api/local/commerce/capabilities'&&!commercial)return send(200,{enabled:false,simulation:true,realCheckoutEnabled:false});
       const commercePublic=await commercial?.handlePublic(req,route);
       if(commercePublic&&!commercePublic.forwardPasswordBody){if(commercePublic.buyerCookie)res.setHeader('Set-Cookie',[commercePublic.buyerCookie,...(commercePublic.clearSession?[cookieHeader(security,'',0)]:[])]);return send(commercePublic.status,commercePublic.data);}

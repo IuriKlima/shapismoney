@@ -1,5 +1,6 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {asaasSandboxClient} from './asaas-client.mjs';
+import {compileAsaasOffers} from './asaas-policy.mjs';
 import {asaasSandboxCommerce} from './flow.mjs';
 import {asaasWebhookHandler} from './asaas-preparation.mjs';
 import {commerceError,exactFields} from './catalog.mjs';
@@ -22,6 +23,8 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
  async function actor(req,role){const u=(await session(req))?.user;if(!u||u.org_id!==scope.org_id||role&&u.role!==role)throw commerceError(401,'Sessao autorizada obrigatoria.');return u;}
  async function principal(req){const u=await actor(req,'student');const b=await store.get('SELECT id,org_id FROM commerce_buyers WHERE user_id=? AND org_id=? AND active=1',u.id,u.org_id);return b?{buyerId:b.id,orgId:b.org_id}:null;}
  const offers=[['monthly',49900,1],['quarterly',119700,3],['semiannual',179400,6]].map(([sku,amountCents,months])=>({sku,amountCents,months,approved:true,version:'manual-protocol-20261012',billingTypes:['PIX','CREDIT_CARD'],maxInstallments:months,renewal:'blocked',access:'onboarding-only'}));
+ const offerPolicy=compileAsaasOffers(offers);
+ const capabilities=()=>({enabled:true,mode:'asaas-sandbox',environment:'sandbox',automaticRenewal:false,catalog:offers.map(o=>({...offerPolicy.snapshot(o.sku,{billingType:o.billingTypes[0]}),billingTypes:[...o.billingTypes],maxInstallments:o.maxInstallments}))});
  async function renewalGuard(b){
   if(await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND status IN ('pending','overdue','review','refund_pending','partially_refunded','chargeback')",b.id))throw commerceError(409,'Resolva a compra existente antes de outra.');
   if(await store.get("SELECT o.id FROM commerce_orders o LEFT JOIN asaas_service_periods p ON p.order_id=o.id WHERE o.buyer_id=? AND o.status='paid' AND p.order_id IS NULL",b.id))throw commerceError(409,'Compra paga aguarda protocolo.');
@@ -88,7 +91,7 @@ async function processBatch(){let processed=0;const exclude=new Set();while(proc
   }
   throw commerceError(404,'Rota sandbox indisponivel.');
  }
- return {handle,accessState,publishedLocked,processBatch,allowsInvitedIdentity:async row=>{if(row.org_id!==scope.org_id)return false;await sourceMarker(row);return true;},async handleWebhook(req,res){
+ return {handle,capabilities,accessState,publishedLocked,processBatch,allowsInvitedIdentity:async row=>{if(row.org_id!==scope.org_id)return false;await sourceMarker(row);return true;},async handleWebhook(req,res){
   let pathname;try{pathname=new URL(req.url,'http://127.0.0.1').pathname;}catch{return false;}if(pathname!=='/api/asaas/webhook')return false;
   // Dedicated server-to-server route; retain socket/Host checks, no browser CSRF bypass elsewhere.
   try{const headers={...req.headers};delete headers.origin;delete headers['sec-fetch-site'];assertRequest({method:'GET',url:req.url,headers,socket:req.socket},security.sandbox?{...security,stage:'webhook'}:security);}catch{res.writeHead(403);res.end();return true;}

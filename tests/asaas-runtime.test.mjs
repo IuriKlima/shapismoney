@@ -21,6 +21,12 @@ async function fixture(work,{proxy=false}={}){const f=await isolatedFixture(),or
 const prepare=async(f,s)=>{assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,200);const r=await s.req('asaas/orders',{sku:'quarterly',billingType:'PIX',confirmed:true});assert.equal(r.status,201,JSON.stringify(r));const id=r.data.orderId;assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,200);return f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);};
 const settle=async(f,a,o)=>{f.payments.set(o.checkout_id,[{id:'pay_'+o.id,customer:o.customer_id,externalReference:o.id,billingType:o.billing_type,value:o.amount_cents/100,status:'RECEIVED'}]);assert.equal(await f.notify(o),200);assert.equal((await a.req('asaas/process',{})).status,200);};
 
+test('sandbox capability catalog comes from approved backend offers and contains no credentials',async()=>fixture(async f=>{
+ const r=await f.client().req('commerce/capabilities');assert.equal(r.status,200);assert.equal(r.data.mode,'asaas-sandbox');assert.deepEqual(r.data.catalog.map(p=>[p.sku,p.amountCents,p.durationMonths]),[['monthly',49900,1],['quarterly',119700,3],['semiannual',179400,6]]);assert.deepEqual(r.data.catalog[0].billingTypes,['PIX','CREDIT_CARD']);assert.ok(!JSON.stringify(r.data).includes(apiKey));assert.ok(!JSON.stringify(r.data).includes(webhookToken));assert.equal(f.calls.length,0);
+ assert.equal((await f.client().req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).status,401);
+ await f.restart(true);const disabled=(await f.client().req('commerce/capabilities')).data;assert.equal(disabled.enabled,false);assert.equal(disabled.mode,undefined);
+}));
+
 test('real HTTP sessions, durable customer, authenticated webhook, clinical intake and first publication connect end to end',async()=>fixture(async f=>{
  const s=f.client(),a=f.client(),c=f.client(),other=f.client();for(const [x,role] of [[s,'student'],[a,'admin'],[c,'coach'],[other,'otherStudent']])assert.equal((await x.login(role)).status,200);
  assert.equal((await f.client().req('asaas/account')).status,401);assert.equal((await s.req('students')).status,403);const o=await prepare(f,s);
