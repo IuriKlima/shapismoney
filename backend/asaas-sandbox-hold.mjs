@@ -19,7 +19,7 @@ export async function startSandboxHold({port=5191,host='0.0.0.0',diagnosticArmFi
    res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8'});return res.end('Visita de teste registrada. Pode voltar ao chat.');
   }
   if(req.url==='/healthz'&&['GET','HEAD'].includes(req.method)){res.writeHead(200,{'Content-Type':'application/json'});return res.end(req.method==='HEAD'?undefined:JSON.stringify({ready:true,mode:'preparation',financialEnabled:false}));}
-  if(req.url==='/'&&['GET','HEAD'].includes(req.method)){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return res.end(req.method==='HEAD'?undefined:'<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Shape - Ambiente de teste</title><main><h1>Ambiente de teste em prepara��o</h1><p>As funcionalidades ainda est�o indispon�veis.</p><p>Nenhum dado pessoal ou pagamento � solicitado nesta p�gina.</p></main></html>');}
+  if(req.url==='/'&&['GET','HEAD'].includes(req.method)){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return res.end(req.method==='HEAD'?undefined:'<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Shape — Ambiente de teste</title><main><h1>Ambiente de teste em preparação</h1><p>As funcionalidades ainda estão indisponíveis.</p><p>Nenhum dado pessoal ou pagamento é solicitado nesta página.</p></main></html>');}
   res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({available:false}));
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
