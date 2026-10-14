@@ -18,6 +18,8 @@ export async function asaasRuntime({store,security,session,read,intakeState,now=
  const scope=await store.get('SELECT * FROM asaas_runtime_config WHERE singleton=1');
  if(!scope||scope.account_id!==configuration.accountId||scope.org_id!==configuration.orgId)throw commerceError(503,'Migracao e escopo sandbox obrigatorios.');
  const client=asaasSandboxClient(configuration);
+ // Verify the credential identity before registering handlers or touching access markers.
+ await client.verifyAccount();
 async function sourceMarker(row){await store.run('INSERT INTO operations VALUES (?,?,?,?,?) ON CONFLICT(actor_id,operation_key) DO NOTHING',row.user_id||row.coach_id,'commerce-source-'+row.id,COMMERCE_SOURCE_MARKER,200,JSON.stringify({studentId:row.id,orgId:row.org_id,source:'payment'}));}
 await store.transaction(async()=>{for(const row of await store.all('SELECT * FROM students WHERE org_id=?',scope.org_id))await sourceMarker(row);});
 
@@ -31,8 +33,17 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
   if(await store.get("SELECT o.id FROM commerce_orders o LEFT JOIN asaas_service_periods p ON p.order_id=o.id WHERE o.buyer_id=? AND o.status='paid' AND p.order_id IS NULL",b.id))throw commerceError(409,'Compra paga aguarda protocolo.');
   if(await store.get('SELECT p.order_id FROM asaas_service_periods p JOIN commerce_orders o ON o.id=p.order_id WHERE o.buyer_id=? AND p.starts_at>?',b.id,now()))throw commerceError(409,'Proximo periodo ja comprado.');
  }
- const core=asaasSandboxCommerce({...configuration,store,client,now,offers,resolvePrincipal:principal,proveIdentity:async()=>{throw commerceError(403,'Use a sessao do aplicativo.');},resolveAdmin:async req=>({userId:(await actor(req,'admin')).id}),manualRenewalGuard:renewalGuard});
+ const core=asaasSandboxCommerce({...configuration,store,client,now,offers,resolvePrincipal:principal,proveIdentity:async()=>{throw commerceError(403,'Use a sessao do aplicativo.');},resolveAdmin:async req=>({userId:(await actor(req,'admin')).id}),manualRenewalGuard:renewalGuard,verifyBuyerIdentity});
  const webhook=asaasWebhookHandler({capabilities:{enabled:true},acceptWebhook:core.acceptWebhook});
+ async function verifyBuyerIdentity(o){
+  const b=await store.get('SELECT * FROM commerce_buyers WHERE id=? AND org_id=? AND active=1',o.buyer_id,o.org_id);
+  if(!b||b.account_id!==o.account_id||b.account_id!==scope.account_id||b.environment!=='sandbox'||b.customer_id!==o.customer_id||b.identity_verified_at===null)return false;
+  const u=await store.get("SELECT * FROM users WHERE id=? AND org_id=? AND role='student' AND active=1",b.user_id,o.org_id);
+  const intent=await store.get('SELECT * FROM asaas_customer_intents WHERE user_id=? AND org_id=?',b.user_id,o.org_id);
+  if(!u||!intent||intent.state!=='ready'||intent.customer_id!==o.customer_id)return false;
+  const c=await client.customerById(o.customer_id);
+  return c.id===intent.customer_id&&c.email===u.email&&c.externalReference===intent.reference&&createHash('sha256').update(u.id+'\0'+u.email+'\0'+String(c.cpfCnpj||'').replace(/\D/g,'')).digest('hex')===intent.fingerprint;
+ }
  async function customer(req,body){
   exactFields(body,['cpfCnpj','confirmed',...FINANCIAL_FIELDS]);const profile=financialFields(body);if(body.confirmed!==true||typeof body.cpfCnpj!=='string'||!/^(?:\d{11}|\d{14})$/.test(body.cpfCnpj))throw commerceError(400,'Confirme o cadastro financeiro.');
   const u=await actor(req,'student'),student=await store.get('SELECT * FROM students WHERE user_id=? AND org_id=?',u.id,u.org_id);if(!student)throw commerceError(409,'Cadastro do aluno obrigatorio.');
@@ -65,25 +76,25 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
   const u=await actor(req,'student');
   const b=await store.get('SELECT * FROM commerce_buyers WHERE user_id=? AND org_id=? AND active=1',u.id,u.org_id);
   const intent=await store.get('SELECT * FROM asaas_customer_intents WHERE user_id=?',u.id);
-  if(!b||!intent||intent.state!=='ready'||intent.customer_id!==b.customer_id||b.account_id!==scope.account_id||b.environment!=='sandbox')throw commerceError(409,'Cadastro financeiro não vinculado.');
+  if(!b||!intent||intent.state!=='ready'||intent.customer_id!==b.customer_id||b.account_id!==scope.account_id||b.environment!=='sandbox')throw commerceError(409,'Cadastro financeiro n�o vinculado.');
   const c=await client.customerById(b.customer_id);
   const fingerprint=createHash('sha256').update(u.id+'\0'+u.email+'\0'+String(c.cpfCnpj||'').replace(/\D/g,'')).digest('hex');
   if(c.externalReference!==intent.reference||c.email!==u.email||fingerprint!==intent.fingerprint)throw commerceError(409,'Identidade financeira divergente.');
   return {buyer:b,customer:c,status:financialStatus(c)};
  }
  async function updateCustomerProfile(req,body){
-  exactFields(body,[...FINANCIAL_FIELDS,'confirmed']);if(body.confirmed!==true)throw commerceError(400,'Confirme os dados fictícios.');
+  exactFields(body,[...FINANCIAL_FIELDS,'confirmed']);if(body.confirmed!==true)throw commerceError(400,'Confirme os dados fict�cios.');
   const fields=financialFields(body);
   return store.transaction(async()=>{
    const before=await customerProfile(req);
-   if(await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND (checkout_state IN ('creating','unknown','ready') OR status='paid')",before.buyer.id))throw commerceError(409,'Checkout existente exige revisão antes de alterar o cadastro.');
+   if(await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND (checkout_state IN ('creating','unknown','ready') OR status='paid')",before.buyer.id))throw commerceError(409,'Checkout existente exige revis�o antes de alterar o cadastro.');
    // Absolute PUT on the same customer; never create a replacement or resend automatically.
    await client.updateCustomer(before.buyer.customer_id,{...fields,notificationDisabled:true});
    const after=await customerProfile(req);
    // Asaas may canonicalize street/neighborhood from the CEP; verify the submitted
    // phone, number and CEP, plus the completeness of its returned address/city.
    const returned=after.status.ready?financialFields(after.customer):null;
-   if(!returned||['phone','addressNumber','postalCode'].some(k=>returned[k]!==fields[k]))throw commerceError(409,'Cadastro retornado pelo Asaas requer revisão. Nenhum checkout foi enviado.');
+   if(!returned||['phone','addressNumber','postalCode'].some(k=>returned[k]!==fields[k]))throw commerceError(409,'Cadastro retornado pelo Asaas requer revis�o. Nenhum checkout foi enviado.');
    return {registered:true,financialProfile:after.status};
   });
  }

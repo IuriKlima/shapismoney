@@ -7,7 +7,7 @@ const checkoutRejections=new WeakSet();
 export const isDefinitiveCheckoutRejection=error=>checkoutRejections.has(error);
 const API='https://api-sandbox.asaas.com/v3';
 const resourceId=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(value);
-const unavailable=()=>commerceError(503,'Resposta Asaas inconclusiva; consulte a conciliação antes de repetir.');
+const unavailable=()=>commerceError(503,'Resposta Asaas inconclusiva; consulte a concilia��o antes de repetir.');
 export const isAsaasSandboxClient=client=>clients.has(client);
 
 async function boundedJSON(response,signal){
@@ -21,27 +21,27 @@ async function boundedJSON(response,signal){
 
 function assertCheckout(body){
  exactFields(body,['billingTypes','chargeTypes','minutesToExpire','externalReference','customer','callback','items','installment']);
- if(!resourceId(body.customer)||!resourceId(body.externalReference)||!Array.isArray(body.billingTypes)||body.billingTypes.length!==1||!['PIX','CREDIT_CARD'].includes(body.billingTypes[0]))throw commerceError(400,'Checkout inválido.');
- if(!Array.isArray(body.chargeTypes)||JSON.stringify(body.chargeTypes)!==JSON.stringify(body.installment?['DETACHED','INSTALLMENT']:['DETACHED']))throw commerceError(400,'Renovação automática não habilitada.');
- if(body.installment){exactFields(body.installment,['maxInstallmentCount']);if(body.billingTypes[0]!=='CREDIT_CARD'||!Number.isInteger(body.installment.maxInstallmentCount)||body.installment.maxInstallmentCount<2||body.installment.maxInstallmentCount>21)throw commerceError(400,'Parcelamento inválido.');}
- if(!Number.isInteger(body.minutesToExpire)||body.minutesToExpire<10||body.minutesToExpire>1440||!Array.isArray(body.items)||body.items.length!==1)throw commerceError(400,'Checkout inválido.');
+ if(!resourceId(body.customer)||!resourceId(body.externalReference)||!Array.isArray(body.billingTypes)||body.billingTypes.length!==1||!['PIX','CREDIT_CARD'].includes(body.billingTypes[0]))throw commerceError(400,'Checkout inv�lido.');
+ if(!Array.isArray(body.chargeTypes)||JSON.stringify(body.chargeTypes)!==JSON.stringify(body.installment?['DETACHED','INSTALLMENT']:['DETACHED']))throw commerceError(400,'Renova��o autom�tica n�o habilitada.');
+ if(body.installment){exactFields(body.installment,['maxInstallmentCount']);if(body.billingTypes[0]!=='CREDIT_CARD'||!Number.isInteger(body.installment.maxInstallmentCount)||body.installment.maxInstallmentCount<2||body.installment.maxInstallmentCount>21)throw commerceError(400,'Parcelamento inv�lido.');}
+ if(!Number.isInteger(body.minutesToExpire)||body.minutesToExpire<10||body.minutesToExpire>1440||!Array.isArray(body.items)||body.items.length!==1)throw commerceError(400,'Checkout inv�lido.');
  exactFields(body.items[0],['name','description','quantity','value']);
- const item=body.items[0];if(item.quantity!==1||typeof item.name!=='string'||item.name.length>200||typeof item.description!=='string'||item.description.length>500||!Number.isFinite(item.value)||item.value<=0||item.value>100000)throw commerceError(400,'Item inválido.');
+ const item=body.items[0];if(item.quantity!==1||typeof item.name!=='string'||item.name.length>200||typeof item.description!=='string'||item.description.length>500||!Number.isFinite(item.value)||item.value<=0||item.value>100000)throw commerceError(400,'Item inv�lido.');
  exactFields(body.callback,['successUrl','cancelUrl','expiredUrl']);
- const origins=new Set();for(const key of ['successUrl','cancelUrl','expiredUrl']){let url;try{url=new URL(body.callback[key]);}catch{throw commerceError(400,'Retorno inválido.');}if(url.protocol!=='https:'||url.username||url.password)throw commerceError(400,'Retorno inválido.');origins.add(url.origin);}
- if(origins.size!==1)throw commerceError(400,'Retorno inválido.');
+ const origins=new Set();for(const key of ['successUrl','cancelUrl','expiredUrl']){let url;try{url=new URL(body.callback[key]);}catch{throw commerceError(400,'Retorno inv�lido.');}if(url.protocol!=='https:'||url.username||url.password)throw commerceError(400,'Retorno inv�lido.');origins.add(url.origin);}
+ if(origins.size!==1)throw commerceError(400,'Retorno inv�lido.');
 }
 
 // Keep only reconciliation evidence. Never return card data/tokens or provider diagnostics.
 function payment(row){
  if(!resourceId(row?.id))throw unavailable();
- return Object.fromEntries(Object.entries({id:row.id,customer:row.customer,externalReference:row.externalReference,value:row.value,billingType:row.billingType,status:row.status,deleted:row.deleted,installment:row.installment,installmentNumber:row.installmentNumber,subscription:row.subscription,refunds:row.refunds?.length?[{}]:[],chargeback:!!row.chargeback}).filter(([,v])=>v!==undefined));
+ return Object.fromEntries(Object.entries({id:row.id,customer:row.customer,externalReference:row.externalReference,checkoutSession:row.checkoutSession,value:row.value,billingType:row.billingType,status:row.status,deleted:row.deleted,installment:row.installment,installmentNumber:row.installmentNumber,subscription:row.subscription,refunds:row.refunds?.length?[{}]:[],chargeback:!!row.chargeback}).filter(([,v])=>v!==undefined));
 }
 
 export function asaasSandboxClient({enabled=false,environment='sandbox',accountId,apiKey,networkAccessApproved=false,fetchImpl=globalThis.fetch,timeoutMs=8000}={}){
  if(!enabled)return null;
- if(environment!=='sandbox'||process.env.NODE_ENV==='production'||networkAccessApproved!==true)throw commerceError(503,'Acesso Asaas não autorizado; produção permanece bloqueada.');
- if(!resourceId(accountId)||typeof apiKey!=='string'||apiKey.length<32||apiKey.length>512||/[\r\n]/.test(apiKey)||typeof fetchImpl!=='function'||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)throw commerceError(503,'Configuração Asaas incompleta.');
+ if(environment!=='sandbox'||process.env.NODE_ENV==='production'||networkAccessApproved!==true)throw commerceError(503,'Acesso Asaas n�o autorizado; produ��o permanece bloqueada.');
+ if(!resourceId(accountId)||typeof apiKey!=='string'||apiKey.length<32||apiKey.length>512||/[\r\n]/.test(apiKey)||typeof fetchImpl!=='function'||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)throw commerceError(503,'Configura��o Asaas incompleta.');
  async function request(method,path,body){
   const abort=new AbortController();let timer;
   try{return await Promise.race([(async()=>{const response=await fetchImpl(API+path,{method,redirect:'error',signal:abort.signal,headers:{access_token:apiKey,'Content-Type':'application/json','User-Agent':'ShapeIsMoney/AsaasPreparation'},...(body?{body:JSON.stringify(body)}:{})});
@@ -50,7 +50,7 @@ export function asaasSandboxClient({enabled=false,environment='sandbox',accountI
     // Only a complete, structured validation refusal from the checkout endpoint is
     // definitive. Never retain provider descriptions, which may contain personal data.
     if(method==='POST'&&path==='/checkouts'&&response.status===400&&/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type')||'')&&data&&Object.keys(data).length===1&&Array.isArray(data.errors)&&data.errors.length>0&&data.errors.length<=20&&data.errors.every(e=>e?.code==='invalid_object')){
-     const error=commerceError(422,'Checkout recusado pelo Asaas. Revise a configuração antes de autorizar outra tentativa.');checkoutRejections.add(error);throw error;
+     const error=commerceError(422,'Checkout recusado pelo Asaas. Revise a configura��o antes de autorizar outra tentativa.');checkoutRejections.add(error);throw error;
     }
     throw unavailable();
    }
@@ -65,7 +65,9 @@ export function asaasSandboxClient({enabled=false,environment='sandbox',accountI
    if(!data.hasMore)return all;offset+=data.data.length;
   }throw unavailable();
  }
- const client=Object.freeze({kind:'asaas',scope:Object.freeze({environment:'sandbox',accountId}),
+ async function accountIdentity(){const data=await request('GET','/myAccount/status');if(!resourceId(data?.id))throw unavailable();return {id:data.id};}
+ async function verifyAccount(){const identity=await accountIdentity();if(identity.id!==accountId)throw commerceError(409,'A conta da credencial Asaas n�o corresponde ao escopo configurado.');return identity;}
+ const client=Object.freeze({kind:'asaas',scope:Object.freeze({environment:'sandbox',accountId}),accountIdentity,verifyAccount,
   async createCustomer(body){
    exactFields(body,['name','email','cpfCnpj','externalReference','notificationDisabled',...FINANCIAL_FIELDS]);
    financialUpdate(Object.fromEntries([...FINANCIAL_FIELDS,'notificationDisabled'].map(k=>[k,body[k]])));
@@ -73,21 +75,21 @@ export function asaasSandboxClient({enabled=false,environment='sandbox',accountI
    const data=await request('POST','/customers',body);if(!resourceId(data?.id))throw unavailable();return {id:data.id};
   },
   async customerById(id){
-   if(!resourceId(id))throw commerceError(400,'Cliente inválido.');
+   if(!resourceId(id))throw commerceError(400,'Cliente inv�lido.');
    const data=await request('GET','/customers/'+encodeURIComponent(id));
    if(data?.id!==id||data.deleted)throw unavailable();
    // Internal use only: callers expose financialStatus, never document/contact data.
    return Object.fromEntries(['id','email','cpfCnpj','externalReference','notificationDisabled','city','cityName',...FINANCIAL_FIELDS].map(k=>[k,data[k]]));
   },
   async updateCustomer(id,body){
-   if(!resourceId(id))throw commerceError(400,'Cliente inválido.');
+   if(!resourceId(id))throw commerceError(400,'Cliente inv�lido.');
    const data=await request('PUT','/customers/'+encodeURIComponent(id),financialUpdate(body));
    if(data?.id!==id)throw unavailable();return {id};
   },
   async customersByReference(reference){if(!resourceId(reference))throw commerceError(400,'Referencia invalida.');const data=await request('GET','/customers?'+new URLSearchParams({externalReference:reference,limit:'100',offset:'0'}));if(!Array.isArray(data?.data)||data.hasMore!==false||data.data.length>1)throw unavailable();return data.data.map(r=>{if(!resourceId(r.id)||r.externalReference!==reference||r.deleted)throw unavailable();return {id:r.id,email:r.email,cpfCnpj:r.cpfCnpj,externalReference:r.externalReference};});},
   async createCheckout(body){assertCheckout(body);const data=await request('POST','/checkouts',body);if(!resourceId(data?.id))throw unavailable();return {id:data.id};},
-  paymentsByCheckout(id){if(!resourceId(id))throw commerceError(400,'Checkout inválido.');return payments({checkoutSession:id});},
-  paymentsByInstallment(id){if(!resourceId(id))throw commerceError(400,'Parcelamento inválido.');return payments({installment:id});},
-  hostedCheckoutUrl(id){if(!resourceId(id))throw commerceError(400,'Checkout inválido.');return 'https://sandbox.asaas.com/checkoutSession/show?id='+encodeURIComponent(id);}
+  paymentsByCheckout(id){if(!resourceId(id))throw commerceError(400,'Checkout inv�lido.');return payments({checkoutSession:id});},
+  paymentsByInstallment(id){if(!resourceId(id))throw commerceError(400,'Parcelamento inv�lido.');return payments({installment:id});},
+  hostedCheckoutUrl(id){if(!resourceId(id))throw commerceError(400,'Checkout inv�lido.');return 'https://sandbox.asaas.com/checkoutSession/show?id='+encodeURIComponent(id);}
  });clients.add(client);return client;
 }

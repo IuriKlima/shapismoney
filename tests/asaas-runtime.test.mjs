@@ -1,4 +1,6 @@
 import {recoverRejectedCheckout} from '../backend/commerce/checkout-recovery.mjs';
+import {repairSandboxAccountScope} from '../backend/commerce/account-scope-repair.mjs';
+import {asaasSandboxClient} from '../backend/commerce/asaas-client.mjs';
 import {asyncLocalStore} from '../backend/async-store.mjs';
 import {sandboxSecurity} from '../backend/security.mjs';
 import test from 'node:test';
@@ -12,17 +14,82 @@ import {INTAKE_VERSION,CONSENT_VERSION} from '../public/sim/intake-fields.js';
 import {fullIntakeAnswers} from './intake-test-fixtures.mjs';
 const profileFixture={phone:'1120000000',address:'Rua Teste Sandbox',addressNumber:'99999',postalCode:'01310000',province:'Bairro Teste'};
 const apiKey='synthetic-api-never-real-00000000000000000',webhookToken='synthetic-hook-never-real-1111111111111111';
-async function fixture(work,{proxy=false}={}){const f=await isolatedFixture(),orgId=f.store.get('SELECT org_id FROM users WHERE id=?',f.ids.student).org_id,accountId='synthetic-runtime';applyAsaasRuntimeSchema(f.store,{isolatedSandbox:true,accountId,orgId});let clock=Date.parse('2026-10-12T15:00:00Z'),app,origin,timeoutCustomer=false,checkoutResponse=null;const calls=[],customers=new Map(),payments=new Map();
- const config={enabled:true,isolatedSandbox:true,environment:'sandbox',networkAccessApproved:true,accountId,orgId,apiKey,webhookToken,publicOrigin:'https://sandbox.fixture.invalid',fetchImpl:async(url,options)=>{assert.equal(new URL(url).origin,'https://api-sandbox.asaas.com');calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});const parsed=new URL(url);if(parsed.pathname.endsWith('/customers')){if(options.method==='POST'){const b=JSON.parse(options.body),id='cus_'+b.externalReference;customers.set(b.externalReference,{...b,id,city:12565,cityName:'São Paulo'});if(timeoutCustomer)throw Error('uncertain');return Response.json({id});}return Response.json({hasMore:false,data:[customers.get(parsed.searchParams.get('externalReference'))].filter(Boolean)});}if(parsed.pathname.includes('/customers/')){const c=[...customers.values()].find(c=>c.id===parsed.pathname.split('/').pop());if(!c)return Response.json({}, {status:404});if(options.method==='PUT')Object.assign(c,JSON.parse(options.body),{city:12565,cityName:'São Paulo'});return Response.json(c);}if(options.method==='POST'&&checkoutResponse)return checkoutResponse();if(options.method==='POST')return Response.json({id:'checkout_'+JSON.parse(options.body).externalReference});return Response.json({hasMore:false,data:payments.get(parsed.searchParams.get('checkoutSession'))||[]});}};
+async function fixture(work,{proxy=false}={}){const f=await isolatedFixture(),orgId=f.store.get('SELECT org_id FROM users WHERE id=?',f.ids.student).org_id,accountId='synthetic-runtime';applyAsaasRuntimeSchema(f.store,{isolatedSandbox:true,accountId,orgId});let clock=Date.parse('2026-10-12T15:00:00Z'),app,origin,timeoutCustomer=false,checkoutResponse=null,providerAccountId=accountId,accountReads=0;const calls=[],customers=new Map(),payments=new Map();
+ const config={enabled:true,isolatedSandbox:true,environment:'sandbox',networkAccessApproved:true,accountId,orgId,apiKey,webhookToken,publicOrigin:'https://sandbox.fixture.invalid',fetchImpl:async(url,options)=>{assert.equal(new URL(url).origin,'https://api-sandbox.asaas.com');if(new URL(url).pathname==='/v3/myAccount/status'){accountReads++;return Response.json({id:providerAccountId});}calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});const parsed=new URL(url);if(parsed.pathname.endsWith('/customers')){if(options.method==='POST'){const b=JSON.parse(options.body),id='cus_'+b.externalReference;customers.set(b.externalReference,{...b,id,city:12565,cityName:'S�o Paulo'});if(timeoutCustomer)throw Error('uncertain');return Response.json({id});}return Response.json({hasMore:false,data:[customers.get(parsed.searchParams.get('externalReference'))].filter(Boolean)});}if(parsed.pathname.includes('/customers/')){const c=[...customers.values()].find(c=>c.id===parsed.pathname.split('/').pop());if(!c)return Response.json({}, {status:404});if(options.method==='PUT')Object.assign(c,JSON.parse(options.body),{city:12565,cityName:'S�o Paulo'});return Response.json(c);}if(options.method==='POST'&&checkoutResponse)return checkoutResponse();if(options.method==='POST')return Response.json({id:'checkout_'+JSON.parse(options.body).externalReference});return Response.json({hasMore:false,data:(payments.get(parsed.searchParams.get('checkoutSession'))||[]).map(p=>({checkoutSession:parsed.searchParams.get('checkoutSession'),...p}))});}};
  const security=proxy?sandboxSecurity({SIM_PUBLIC_ORIGIN:'https://sandbox.example.test',SIM_TRUSTED_PROXY_IPS:'127.0.0.1',SIM_STAGING_CLIENT_IPS:'192.0.2.10'}):undefined;const proxyHeaders=proxy?{'x-forwarded-host':'sandbox.example.test','x-forwarded-proto':'https','x-forwarded-for':'192.0.2.10'}:{};
  async function start(store){app=await createLocalServer({security,store,filename:f.filename,now:()=>clock,sessionMs:365*86400000,asaas:config});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+app.server.address().port;if(security)security.upstreamHost=new URL(origin).host;}
  await start(f.store);
  function client(){let cookie='';return {async req(route,body,method='POST',headers={}){const r=await fetch(origin+'/api/local/'+route,{method:body===undefined?'GET':method,headers:{...proxyHeaders,Cookie:cookie,Origin:security?.origin||origin,'Content-Type':'application/json','Idempotency-Key':randomUUID(),...headers},body:body===undefined?undefined:JSON.stringify(body)});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};},login(role){return this.req('login',{email:role.toLowerCase()+'@fixture.invalid',password:FIXTURE_PASSWORD});}};}
  async function notify(o,event='CHECKOUT_PAID',token=webhookToken,id=randomUUID()){const r=await fetch(origin+'/api/asaas/webhook',{method:'POST',headers:{...proxyHeaders,...(proxy?{'x-forwarded-for':'198.51.100.20'}:{}),'Content-Type':'application/json','asaas-access-token':token},body:JSON.stringify({id,event,account:{id:accountId},checkout:{id:o.checkout_id,customer:o.customer_id,externalReference:o.id}})});return r.status;}
- try{await work({...f,config,client,calls,customers,payments,notify,get store(){return app.store;},get origin(){return origin;},clock:()=>clock,advance:ms=>{clock+=ms;},customerTimeout:()=>{timeoutCustomer=true;},checkoutResponse:value=>{checkoutResponse=value;},async restart(disabled=false){await app.close();config.enabled=!disabled;await start();}});}finally{await app.close();}
+ try{await work({...f,config,client,calls,customers,payments,notify,get store(){return app.store;},get origin(){return origin;},clock:()=>clock,advance:ms=>{clock+=ms;},accountReads:()=>accountReads,providerAccount:value=>{providerAccountId=value;},customerTimeout:()=>{timeoutCustomer=true;},checkoutResponse:value=>{checkoutResponse=value;},async restart(disabled=false){await app.close();config.enabled=!disabled;await start();}});}finally{await app.close();}
 }
 const prepare=async(f,s)=>{assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture})).status,200);const r=await s.req('asaas/orders',{sku:'quarterly',billingType:'PIX',confirmed:true});assert.equal(r.status,201,JSON.stringify(r));const id=r.data.orderId;assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,200);return f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);};
 const settle=async(f,a,o)=>{f.payments.set(o.checkout_id,[{id:'pay_'+o.id,customer:o.customer_id,externalReference:o.id,billingType:o.billing_type,value:o.amount_cents/100,status:'RECEIVED'}]);assert.equal(await f.notify(o),200);assert.equal((await a.req('asaas/process',{})).status,200);};
+
+test('operator scope repair uses official identity, is dry by default, and atomically preserves the sole unpaid checkout',async()=>fixture(async f=>{
+ const s=f.client();await s.login('student');await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
+ const id=(await s.req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).data.orderId;await s.req('asaas/orders/'+id+'/checkout',{});
+ const original=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id),scope=f.store.get('SELECT * FROM asaas_runtime_config'),customer=[...f.customers.values()][0],history=f.store.all('SELECT * FROM commerce_audit WHERE order_id=?',id);
+ let actualAccount='verified-target',rows=[{id:'pay_existing',checkoutSession:original.checkout_id,customer:original.customer_id,externalReference:null,value:499,billingType:'PIX',status:'PENDING'}];const calls=[];
+ const client=asaasSandboxClient({...f.config,accountId:'verified-target',fetchImpl:async(url,options)=>{calls.push(options.method);assert.equal(options.method,'GET');if(url.endsWith('/myAccount/status'))return Response.json({id:actualAccount});if(url.includes('/customers/'))return Response.json(customer);return Response.json({hasMore:false,data:rows});}});
+ const args={store:asyncLocalStore(f.store),client,orderId:id,actorId:f.ids.admin,orgId:scope.org_id,fromAccountId:scope.account_id,toAccountId:'verified-target',expectedRevision:original.revision,expectedUpdatedAt:original.updated_at,expectedCheckoutId:original.checkout_id,now:f.clock};
+ assert.equal((await repairSandboxAccountScope(args)).dryRun,true);assert.deepEqual(f.store.get('SELECT * FROM commerce_orders WHERE id=?',id),original);
+ actualAccount='unrelated-account';await assert.rejects(repairSandboxAccountScope(args),{status:409});actualAccount='verified-target';
+ rows[0].status='RECEIVED';await assert.rejects(repairSandboxAccountScope(args),{status:409});rows[0].status='PENDING';
+ rows.push({...rows[0],id:'second'});await assert.rejects(repairSandboxAccountScope(args),{status:409});rows.pop();
+ await assert.rejects(repairSandboxAccountScope({...args,expectedRevision:original.revision+1}),{status:409});
+ await assert.rejects(repairSandboxAccountScope({...args,actorId:f.ids.student}),{status:409});
+ await assert.rejects(repairSandboxAccountScope({...args,apply:true}),{status:403});
+ await f.notify(original,'CHECKOUT_CREATED');await assert.rejects(repairSandboxAccountScope(args),{status:409});f.store.run('DELETE FROM commerce_events');
+ f.store.exec("CREATE TRIGGER scope_audit_failure BEFORE INSERT ON commerce_audit WHEN NEW.event LIKE 'commerce.account.scope-corrected:%' BEGIN SELECT RAISE(ABORT,'atomic repair test'); END");
+ await assert.rejects(repairSandboxAccountScope({...args,apply:true,approved:true}));assert.deepEqual(f.store.get('SELECT * FROM asaas_runtime_config'),scope);assert.deepEqual(f.store.get('SELECT * FROM commerce_orders WHERE id=?',id),original);f.store.exec('DROP TRIGGER scope_audit_failure');
+ assert.equal((await repairSandboxAccountScope({...args,apply:true,approved:true})).applied,true);
+ const next=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);assert.equal(next.account_id,'verified-target');assert.equal(next.revision,original.revision+1);assert.equal(next.checkout_id,original.checkout_id);assert.equal(next.status,'pending');assert.equal(next.idempotency_key,original.idempotency_key);
+ for(const row of history)assert.deepEqual(f.store.get('SELECT * FROM commerce_audit WHERE id=?',row.id),row);
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);assert.ok(calls.every(m=>m==='GET'));
+ await assert.rejects(repairSandboxAccountScope({...args,apply:true,approved:true}),{status:409});
+}));
+
+test('multiple null-reference Pix payments cannot masquerade as a single detached checkout',async()=>fixture(async f=>{
+ const s=f.client(),a=f.client();await s.login('student');await a.login('admin');const o=await prepare(f,s);
+ const row={checkoutSession:o.checkout_id,customer:o.customer_id,externalReference:null,value:o.amount_cents/200,billingType:'PIX',status:'RECEIVED'};f.payments.set(o.checkout_id,[{...row,id:'p1'},{...row,id:'p2'}]);await f.notify(o);await a.req('asaas/process',{});
+ assert.equal(f.store.get('SELECT status FROM commerce_orders WHERE id=?',o.id).status,'review');assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);
+}));
+
+test('real-shaped null payment reference binds through persisted checkout and verified account/customer, idempotently',async()=>fixture(async f=>{
+ const s=f.client(),a=f.client();await s.login('student');await a.login('admin');const o=await prepare(f,s);
+ const row={id:'pay_null_reference',checkoutSession:o.checkout_id,customer:o.customer_id,externalReference:null,value:o.amount_cents/100,billingType:'PIX',status:'RECEIVED'};
+ f.payments.set(o.checkout_id,[row]);const eventId='evt_fixture&12345';assert.equal(await f.notify(o,'CHECKOUT_PAID',webhookToken,eventId),200);await a.req('asaas/process',{});
+ assert.equal(f.store.get('SELECT status FROM commerce_orders WHERE id=?',o.id).status,'paid');assert.equal(f.store.get('SELECT onboarding_authorized FROM commerce_entitlements WHERE order_id=?',o.id).onboarding_authorized,1);
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM asaas_service_periods').n,0);assert.equal((await s.req('students')).status,200);
+ assert.equal(await f.notify(o,'CHECKOUT_PAID',webhookToken,eventId),200);await a.req('asaas/process',{});
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,1);assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_payments').n,1);assert.ok(f.accountReads()>=2);
+}));
+
+test('checkout binding rejects mismatched, ambiguous and incomplete payment proof',async t=>{
+ const cases=[['checkout',{checkoutSession:'other'}],['missing checkout',{checkoutSession:undefined}],['customer',{customer:'other'}],['non-null conflicting reference',{externalReference:'other'}],['missing reference property',{externalReference:undefined}],['empty reference',{externalReference:''}],['amount',{value:1}],['modality',{billingType:'CREDIT_CARD'}],['subscription',{subscription:'sub_other'}],['deleted',{deleted:true}],['refund',{refunds:[{}]}],['chargeback',{chargeback:{status:'REQUESTED'}}]];
+ for(const [name,change] of cases)await t.test(name,async()=>fixture(async f=>{
+  const s=f.client(),a=f.client();await s.login('student');await a.login('admin');const o=await prepare(f,s);
+  f.payments.set(o.checkout_id,[{id:'pay_bad',checkoutSession:o.checkout_id,customer:o.customer_id,externalReference:null,value:o.amount_cents/100,billingType:'PIX',status:'RECEIVED',...change}]);await f.notify(o);await a.req('asaas/process',{});
+  assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);assert.equal(f.store.get('SELECT status FROM commerce_orders WHERE id=?',o.id).status,'review');
+ }));
+});
+
+test('null reference requires unchanged verified identity; authenticated callback alone never authorizes',async()=>fixture(async f=>{
+ const s=f.client(),a=f.client();await s.login('student');await a.login('admin');const o=await prepare(f,s);
+ f.payments.set(o.checkout_id,[{id:'pay_identity',checkoutSession:o.checkout_id,customer:o.customer_id,externalReference:null,value:o.amount_cents/100,billingType:'PIX',status:'RECEIVED'}]);
+ [...f.customers.values()][0].cpfCnpj='00000000000';await f.notify(o);await a.req('asaas/process',{});
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);assert.equal(f.store.get('SELECT status FROM commerce_orders WHERE id=?',o.id).status,'review');
+}));
+
+test('official account mismatch blocks startup and reconciliation without accepting webhook identity as authority',async()=>fixture(async f=>{
+ const s=f.client(),a=f.client();await s.login('student');await a.login('admin');const o=await prepare(f,s);
+ const before=f.store.get('SELECT COUNT(*) n FROM operations').n;
+ await assert.rejects(asaasRuntime({store:asyncLocalStore(f.store),security:{production:false},configuration:{...f.config,fetchImpl:async()=>Response.json({id:'different-account'})}}),{status:409});
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM operations').n,before);
+ f.providerAccount('different-account');f.payments.set(o.checkout_id,[{id:'pay_scope',checkoutSession:o.checkout_id,customer:o.customer_id,externalReference:null,value:o.amount_cents/100,billingType:'PIX',status:'RECEIVED'}]);
+ await f.notify(o);await a.req('asaas/process',{});assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);assert.equal(f.store.get('SELECT status FROM commerce_orders WHERE id=?',o.id).status,'review');
+}));
 
 test('revision-3 profile refusal recovery needs corrected provider evidence and preserves the preceding history',async()=>fixture(async f=>{
  const s=f.client();await s.login('student');await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
