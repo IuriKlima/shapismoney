@@ -76,25 +76,25 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
   const u=await actor(req,'student');
   const b=await store.get('SELECT * FROM commerce_buyers WHERE user_id=? AND org_id=? AND active=1',u.id,u.org_id);
   const intent=await store.get('SELECT * FROM asaas_customer_intents WHERE user_id=?',u.id);
-  if(!b||!intent||intent.state!=='ready'||intent.customer_id!==b.customer_id||b.account_id!==scope.account_id||b.environment!=='sandbox')throw commerceError(409,'Cadastro financeiro n�o vinculado.');
+  if(!b||!intent||intent.state!=='ready'||intent.customer_id!==b.customer_id||b.account_id!==scope.account_id||b.environment!=='sandbox')throw commerceError(409,'Cadastro financeiro não vinculado.');
   const c=await client.customerById(b.customer_id);
   const fingerprint=createHash('sha256').update(u.id+'\0'+u.email+'\0'+String(c.cpfCnpj||'').replace(/\D/g,'')).digest('hex');
   if(c.externalReference!==intent.reference||c.email!==u.email||fingerprint!==intent.fingerprint)throw commerceError(409,'Identidade financeira divergente.');
   return {buyer:b,customer:c,status:financialStatus(c)};
  }
  async function updateCustomerProfile(req,body){
-  exactFields(body,[...FINANCIAL_FIELDS,'confirmed']);if(body.confirmed!==true)throw commerceError(400,'Confirme os dados fict�cios.');
+  exactFields(body,[...FINANCIAL_FIELDS,'confirmed']);if(body.confirmed!==true)throw commerceError(400,'Confirme os dados fictícios.');
   const fields=financialFields(body);
   return store.transaction(async()=>{
    const before=await customerProfile(req);
-   if(await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND (checkout_state IN ('creating','unknown','ready') OR status='paid')",before.buyer.id))throw commerceError(409,'Checkout existente exige revis�o antes de alterar o cadastro.');
+   if(await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND (checkout_state IN ('creating','unknown','ready') OR status='paid')",before.buyer.id))throw commerceError(409,'Checkout existente exige revisão antes de alterar o cadastro.');
    // Absolute PUT on the same customer; never create a replacement or resend automatically.
    await client.updateCustomer(before.buyer.customer_id,{...fields,notificationDisabled:true});
    const after=await customerProfile(req);
    // Asaas may canonicalize street/neighborhood from the CEP; verify the submitted
    // phone, number and CEP, plus the completeness of its returned address/city.
    const returned=after.status.ready?financialFields(after.customer):null;
-   if(!returned||['phone','addressNumber','postalCode'].some(k=>returned[k]!==fields[k]))throw commerceError(409,'Cadastro retornado pelo Asaas requer revis�o. Nenhum checkout foi enviado.');
+   if(!returned||['phone','addressNumber','postalCode'].some(k=>returned[k]!==fields[k]))throw commerceError(409,'Cadastro retornado pelo Asaas requer revisão. Nenhum checkout foi enviado.');
    return {registered:true,financialProfile:after.status};
   });
  }
