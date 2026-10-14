@@ -16,7 +16,8 @@ export async function recoverRejectedCheckout({store,orderId,actorId,accountId,o
   if(await store.get('SELECT id FROM commerce_audit WHERE order_id=? AND event=?',orderId,marker))return {orderId,alreadyRecorded:true,rearmed:false};
   if(o.billing_type!=='PIX'||o.amount_cents!==49900||o.revision!==expectedRevision||o.updated_at!==expectedUpdatedAt||o.checkout_id||o.adverse_seen||!((o.checkout_state==='unknown'&&o.status==='pending')||(o.checkout_state==='new'&&o.status==='review')))fail();
   const e=evidence;
-  if(e.orderId!==o.id||e.externalReference!==o.external_reference||e.customerId!==o.customer_id||e.accountId!==accountId||e.environment!=='sandbox'||e.method!=='POST'||e.path!=='/api/v3/checkouts'||e.httpStatus!==400||e.code!=='invalid_object'||e.reason!=='missing-pix-key'||e.responseHasResource!==false||e.reviewedLog!==true||e.singleAttemptConfirmed!==true||e.checkoutAbsenceBasis!=='provider-validation-rejection')fail();
+  if(e.orderId!==o.id||e.externalReference!==o.external_reference||e.customerId!==o.customer_id||e.accountId!==accountId||e.environment!=='sandbox'||e.method!=='POST'||e.path!=='/api/v3/checkouts'||e.httpStatus!==400||e.code!=='invalid_object'||!['missing-pix-key','missing-customer-profile'].includes(e.reason)||e.responseHasResource!==false||e.reviewedLog!==true||e.singleAttemptConfirmed!==true||e.checkoutAbsenceBasis!=='provider-validation-rejection')fail();
+  if(e.reason==='missing-customer-profile'&&(o.status!=='review'||o.checkout_state!=='new'||e.customerProfileVerified!==true||e.notificationDisabled!==true||!Number.isSafeInteger(e.city)||e.city<=0||e.city>2147483647||JSON.stringify(e.rejectedFields)!==JSON.stringify(['phone','address','addressNumber','postalCode','province','city'])))fail();
   if(!Number.isSafeInteger(e.checkedAt)||e.checkedAt>now()||now()-e.checkedAt>60000||e.paymentsHttpStatus!==200||e.paymentsComplete!==true||e.paymentCount!==0||e.activePixKey!==true)fail();
   for(const table of ['commerce_payments','commerce_entitlements','asaas_service_periods'])if(await store.get('SELECT order_id FROM '+table+' WHERE order_id=?',orderId))fail();
   if(await store.get('SELECT event_id FROM commerce_events WHERE environment=? AND account_id=? AND (external_reference=? OR customer_id=?)','sandbox',accountId,o.external_reference,o.customer_id))fail();
@@ -27,7 +28,7 @@ export async function recoverRejectedCheckout({store,orderId,actorId,accountId,o
   const result=await store.run("UPDATE commerce_orders SET status='pending',checkout_state='new',revision=revision+1,updated_at=? WHERE id=? AND revision=? AND updated_at=? AND checkout_id IS NULL",now(),orderId,expectedRevision,expectedUpdatedAt);
   if(result.changes!==1)fail();
   await store.run('INSERT INTO commerce_audit VALUES (?,?,?,?,?)',randomUUID(),orderId,orgId,marker,now());
-  await store.run('INSERT INTO commerce_audit VALUES (?,?,?,?,?)',randomUUID(),orderId,orgId,'commerce.checkout.recovery-evidence:'+JSON.stringify({actorId,logId:e.logId,http:400,code:e.code,reason:e.reason,checkedAt:e.checkedAt,paymentCount:0,checkoutAbsenceBasis:e.checkoutAbsenceBasis,from:plan.from}),now());
+  await store.run('INSERT INTO commerce_audit VALUES (?,?,?,?,?)',randomUUID(),orderId,orgId,'commerce.checkout.recovery-evidence:'+JSON.stringify({actorId,logId:e.logId,http:400,code:e.code,reason:e.reason,checkedAt:e.checkedAt,paymentCount:0,checkoutAbsenceBasis:e.checkoutAbsenceBasis,from:plan.from,...(e.reason==='missing-customer-profile'?{customerProfileVerified:true,notificationDisabled:true,city:e.city,rejectedFields:e.rejectedFields}:{})}),now());
   return {orderId,rearmed:true,plan};
  });
 }

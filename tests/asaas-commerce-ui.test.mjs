@@ -35,3 +35,13 @@ test('checkout URL allows only hosted sandbox and requires an explicit link clic
  let url='https://www.asaas.com/checkoutSession/show?id=test';const h=harness({api:async p=>p==='asaas/account'?{registered:true,orders:[]}:{checkoutUrl:url}});await h.ui.loadPublic();await assert.rejects(()=>h.click('order'),/fora do Asaas Sandbox/);assert.ok(!h.ui.render().includes('href='));
  url='https://sandbox.asaas.com/checkoutSession/show?id=test';await h.click('order');assert.match(h.ui.render(),/href="https:\/\/sandbox\.asaas\.com\/checkoutSession\/show\?id=test"/);assert.match(h.ui.render(),/noopener noreferrer/);
 });
+
+test('financial profile UI submits only contact/address fields to PUT and never sends city guesses or another checkout',async()=>{
+ let ready=false;const h=harness({api:async(p)=>p==='asaas/account'?{registered:true,financialProfile:{ready,cityName:null},orders:[{orderId:'order',plan:catalog[0],status:'review',checkoutState:'new'}]}:(ready=true,{})});
+ await h.ui.loadPublic();for(const field of ['phone','address','addressNumber','postalCode','province','city'])assert.match(h.ui.render(),new RegExp('name="'+field+'"'));
+ assert.match(h.ui.render(),/name="city" readonly/);assert.ok(!h.ui.render().includes('data-commerce-asaas-checkout'));
+ const fields={phone:'1120000000',address:'Rua Teste Sandbox',addressNumber:'99999',postalCode:'01310000',province:'Bairro Teste'};
+ await h.submit('profile',{...fields,city:'wrong value',confirmed:'on'});
+ assert.deepEqual(h.calls.find(([p])=>p==='asaas/customer/profile'),['asaas/customer/profile',{...fields,confirmed:true},'PUT']);
+ assert.ok(!h.calls.some(([p])=>p.endsWith('/checkout')||p==='asaas/customer'||p==='asaas/orders'));assert.ok(!h.ui.render().includes('data-commerce-asaas-checkout'));
+});

@@ -10,9 +10,10 @@ import {applyAsaasRuntimeSchema} from '../backend/commerce/asaas-runtime-migrate
 import {asaasRuntime} from '../backend/commerce/asaas-runtime.mjs';
 import {INTAKE_VERSION,CONSENT_VERSION} from '../public/sim/intake-fields.js';
 import {fullIntakeAnswers} from './intake-test-fixtures.mjs';
+const profileFixture={phone:'1120000000',address:'Rua Teste Sandbox',addressNumber:'99999',postalCode:'01310000',province:'Bairro Teste'};
 const apiKey='synthetic-api-never-real-00000000000000000',webhookToken='synthetic-hook-never-real-1111111111111111';
 async function fixture(work,{proxy=false}={}){const f=await isolatedFixture(),orgId=f.store.get('SELECT org_id FROM users WHERE id=?',f.ids.student).org_id,accountId='synthetic-runtime';applyAsaasRuntimeSchema(f.store,{isolatedSandbox:true,accountId,orgId});let clock=Date.parse('2026-10-12T15:00:00Z'),app,origin,timeoutCustomer=false,checkoutResponse=null;const calls=[],customers=new Map(),payments=new Map();
- const config={enabled:true,isolatedSandbox:true,environment:'sandbox',networkAccessApproved:true,accountId,orgId,apiKey,webhookToken,publicOrigin:'https://sandbox.fixture.invalid',fetchImpl:async(url,options)=>{assert.equal(new URL(url).origin,'https://api-sandbox.asaas.com');calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});const parsed=new URL(url);if(parsed.pathname.endsWith('/customers')){if(options.method==='POST'){const b=JSON.parse(options.body),id='cus_'+b.externalReference;customers.set(b.externalReference,{...b,id});if(timeoutCustomer)throw Error('uncertain');return Response.json({id});}return Response.json({hasMore:false,data:[customers.get(parsed.searchParams.get('externalReference'))].filter(Boolean)});}if(options.method==='POST'&&checkoutResponse)return checkoutResponse();if(options.method==='POST')return Response.json({id:'checkout_'+JSON.parse(options.body).externalReference});return Response.json({hasMore:false,data:payments.get(parsed.searchParams.get('checkoutSession'))||[]});}};
+ const config={enabled:true,isolatedSandbox:true,environment:'sandbox',networkAccessApproved:true,accountId,orgId,apiKey,webhookToken,publicOrigin:'https://sandbox.fixture.invalid',fetchImpl:async(url,options)=>{assert.equal(new URL(url).origin,'https://api-sandbox.asaas.com');calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});const parsed=new URL(url);if(parsed.pathname.endsWith('/customers')){if(options.method==='POST'){const b=JSON.parse(options.body),id='cus_'+b.externalReference;customers.set(b.externalReference,{...b,id,city:12565,cityName:'São Paulo'});if(timeoutCustomer)throw Error('uncertain');return Response.json({id});}return Response.json({hasMore:false,data:[customers.get(parsed.searchParams.get('externalReference'))].filter(Boolean)});}if(parsed.pathname.includes('/customers/')){const c=[...customers.values()].find(c=>c.id===parsed.pathname.split('/').pop());if(!c)return Response.json({}, {status:404});if(options.method==='PUT')Object.assign(c,JSON.parse(options.body),{city:12565,cityName:'São Paulo'});return Response.json(c);}if(options.method==='POST'&&checkoutResponse)return checkoutResponse();if(options.method==='POST')return Response.json({id:'checkout_'+JSON.parse(options.body).externalReference});return Response.json({hasMore:false,data:payments.get(parsed.searchParams.get('checkoutSession'))||[]});}};
  const security=proxy?sandboxSecurity({SIM_PUBLIC_ORIGIN:'https://sandbox.example.test',SIM_TRUSTED_PROXY_IPS:'127.0.0.1',SIM_STAGING_CLIENT_IPS:'192.0.2.10'}):undefined;const proxyHeaders=proxy?{'x-forwarded-host':'sandbox.example.test','x-forwarded-proto':'https','x-forwarded-for':'192.0.2.10'}:{};
  async function start(store){app=await createLocalServer({security,store,filename:f.filename,now:()=>clock,sessionMs:365*86400000,asaas:config});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+app.server.address().port;if(security)security.upstreamHost=new URL(origin).host;}
  await start(f.store);
@@ -20,8 +21,62 @@ async function fixture(work,{proxy=false}={}){const f=await isolatedFixture(),or
  async function notify(o,event='CHECKOUT_PAID',token=webhookToken,id=randomUUID()){const r=await fetch(origin+'/api/asaas/webhook',{method:'POST',headers:{...proxyHeaders,...(proxy?{'x-forwarded-for':'198.51.100.20'}:{}),'Content-Type':'application/json','asaas-access-token':token},body:JSON.stringify({id,event,account:{id:accountId},checkout:{id:o.checkout_id,customer:o.customer_id,externalReference:o.id}})});return r.status;}
  try{await work({...f,config,client,calls,customers,payments,notify,get store(){return app.store;},get origin(){return origin;},clock:()=>clock,advance:ms=>{clock+=ms;},customerTimeout:()=>{timeoutCustomer=true;},checkoutResponse:value=>{checkoutResponse=value;},async restart(disabled=false){await app.close();config.enabled=!disabled;await start();}});}finally{await app.close();}
 }
-const prepare=async(f,s)=>{assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,200);const r=await s.req('asaas/orders',{sku:'quarterly',billingType:'PIX',confirmed:true});assert.equal(r.status,201,JSON.stringify(r));const id=r.data.orderId;assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,200);return f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);};
+const prepare=async(f,s)=>{assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture})).status,200);const r=await s.req('asaas/orders',{sku:'quarterly',billingType:'PIX',confirmed:true});assert.equal(r.status,201,JSON.stringify(r));const id=r.data.orderId;assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,200);return f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);};
 const settle=async(f,a,o)=>{f.payments.set(o.checkout_id,[{id:'pay_'+o.id,customer:o.customer_id,externalReference:o.id,billingType:o.billing_type,value:o.amount_cents/100,status:'RECEIVED'}]);assert.equal(await f.notify(o),200);assert.equal((await a.req('asaas/process',{})).status,200);};
+
+test('revision-3 profile refusal recovery needs corrected provider evidence and preserves the preceding history',async()=>fixture(async f=>{
+ const s=f.client();await s.login('student');await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
+ const id=(await s.req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).data.orderId;
+ f.checkoutResponse(()=>Response.json({errors:[{code:'invalid_object',description:'missing financial profile'}]},{status:400}));
+ await s.req('asaas/orders/'+id+'/checkout',{});
+ // Model the current live revision after its separately audited first recovery.
+ f.store.run('UPDATE commerce_orders SET revision=3 WHERE id=?',id);
+ const old=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id),history=f.store.all('SELECT * FROM commerce_audit WHERE order_id=?',id),calls=f.calls.length;
+ const evidence={logId:'89755343',orderId:id,externalReference:id,customerId:old.customer_id,accountId:old.account_id,environment:'sandbox',method:'POST',path:'/api/v3/checkouts',httpStatus:400,code:'invalid_object',reason:'missing-customer-profile',responseHasResource:false,reviewedLog:true,singleAttemptConfirmed:true,checkoutAbsenceBasis:'provider-validation-rejection',checkedAt:f.clock(),paymentsHttpStatus:200,paymentsComplete:true,paymentCount:0,activePixKey:true,customerProfileVerified:true,notificationDisabled:true,city:12565,rejectedFields:['phone','address','addressNumber','postalCode','province','city']};
+ const args={store:asyncLocalStore(f.store),orderId:id,actorId:f.ids.admin,accountId:old.account_id,orgId:old.org_id,expectedRevision:3,expectedUpdatedAt:old.updated_at,evidence,now:f.clock};
+ await assert.rejects(recoverRejectedCheckout({...args,expectedRevision:1}),{status:409});
+ for(const change of [{customerProfileVerified:false},{notificationDisabled:false},{city:null},{city:'12565'},{rejectedFields:[]},{reason:'unknown'}])await assert.rejects(recoverRejectedCheckout({...args,evidence:{...evidence,...change}}),{status:409});
+ assert.equal((await recoverRejectedCheckout(args)).dryRun,true);assert.equal(f.store.get('SELECT revision FROM commerce_orders WHERE id=?',id).revision,3);
+ assert.equal((await recoverRejectedCheckout({...args,apply:true,approved:true})).rearmed,true);
+ const next=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);assert.equal(next.revision,4);assert.equal(next.status,'pending');assert.equal(next.idempotency_key,old.idempotency_key);assert.equal(next.external_reference,old.external_reference);
+ for(const row of history)assert.deepEqual(f.store.get('SELECT * FROM commerce_audit WHERE id=?',row.id),row);
+ assert.equal((await recoverRejectedCheckout({...args,apply:true,approved:true})).alreadyRecorded,true);assert.equal(f.calls.length,calls);
+}));
+
+test('incomplete customer is repaired in place without checkout, new customer, recovery or access changes',async()=>fixture(async f=>{
+ const s=f.client(),other=f.client();await s.login('student');await other.login('otherStudent');
+ assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,400);assert.equal(f.calls.length,0);
+ await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
+ const id=(await s.req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).data.orderId;
+ const c=[...f.customers.values()][0];for(const field of ['phone','address','addressNumber','postalCode','province','city'])delete c[field];
+ const original=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);
+ assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,409);
+ assert.equal(f.calls.filter(c=>c.url.endsWith('/checkouts')).length,0);
+ const account=(await s.req('asaas/account')).data;assert.equal(account.financialProfile.ready,false);assert.ok(account.financialProfile.missing.includes('city'));assert.ok(!JSON.stringify(account).includes('12345678909'));
+ const input={...profileFixture,confirmed:true};
+ assert.equal((await other.req('asaas/customer/profile',input,'PUT')).status,409);
+ assert.equal((await s.req('asaas/customer/profile',{...input,city:3550308},'PUT')).status,400);
+ assert.equal((await s.req('asaas/customer/profile',input,'PUT',{Origin:'https://evil.invalid'})).status,403);
+ const fixed=await s.req('asaas/customer/profile',input,'PUT');assert.equal(fixed.status,200,JSON.stringify(fixed));assert.equal(fixed.data.financialProfile.ready,true);assert.equal(fixed.data.financialProfile.city,12565);
+ assert.equal(f.calls.filter(c=>c.method==='PUT').length,1);assert.equal(f.calls.filter(c=>c.method==='POST'&&c.url.endsWith('/customers')).length,1);
+ assert.deepEqual(f.store.get('SELECT * FROM commerce_orders WHERE id=?',id),original);
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);assert.equal(f.store.get('SELECT COUNT(*) n FROM asaas_service_periods').n,0);
+ assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,200);
+ assert.equal((await s.req('asaas/customer/profile',input,'PUT')).status,409);
+}));
+
+test('profile checks fail closed on unresolved city, enabled notifications, changed identity and uncertain PUT',async()=>fixture(async f=>{
+ const s=f.client();await s.login('student');await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
+ const id=(await s.req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).data.orderId;
+ const c=[...f.customers.values()][0],oldEmail=c.email;
+ for(const invalid of [{city:null},{city:'12565'},{notificationDisabled:false}]){
+  const before={...c};Object.assign(c,invalid);assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,409);Object.assign(c,before);
+ }
+ c.email='other@fixture.invalid';assert.equal((await s.req('asaas/customer/profile',{...profileFixture,confirmed:true},'PUT')).status,409);c.email=oldEmail;
+ const fetchImpl=f.config.fetchImpl;f.config.fetchImpl=async(url,options)=>{if(options.method==='PUT')throw Error('lost update response');return fetchImpl(url,options);};await f.restart();
+ assert.equal((await s.req('asaas/customer/profile',{...profileFixture,confirmed:true},'PUT')).status,503);
+ assert.equal(f.calls.filter(c=>c.url.endsWith('/checkouts')).length,0);assert.equal(f.store.get('SELECT status FROM commerce_orders WHERE id=?',id).status,'pending');
+}));
 
 test('sandbox capability catalog comes from approved backend offers and contains no credentials',async()=>fixture(async f=>{
  for(const path of ['/local','/sim/persistent.js','/sim/commerce-ui.js','/sim/asaas-commerce-ui.js']){const asset=await fetch(f.origin+path);assert.equal(asset.status,200,path);assert.ok((await asset.text()).length>0);}
@@ -57,7 +112,7 @@ const renewed=f.store.get('SELECT * FROM asaas_service_periods WHERE order_id=?'
 assert.equal(f.calls.filter(c=>c.method==='POST'&&c.url.endsWith('/customers')).length,1);assert.equal(f.calls.find(c=>c.url.endsWith('/customers')&&c.method==='POST').body.notificationDisabled,true);
 }));
 
-test('uncertain customer creation never repeats POST; reference recovery uses matching authenticated identity',async()=>fixture(async f=>{const s=f.client();await s.login('student');f.customerTimeout();assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,503);await f.restart();assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,409);assert.equal((await s.req('asaas/customer/recover',{cpfCnpj:'00000000000'})).status,409);assert.equal((await s.req('asaas/customer/recover',{cpfCnpj:'12345678909'})).status,200);assert.equal(f.calls.filter(c=>c.method==='POST').length,1);}));
+test('uncertain customer creation never repeats POST; reference recovery uses matching authenticated identity',async()=>fixture(async f=>{const s=f.client();await s.login('student');f.customerTimeout();assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture})).status,503);await f.restart();assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture})).status,409);assert.equal((await s.req('asaas/customer/recover',{cpfCnpj:'00000000000'})).status,409);assert.equal((await s.req('asaas/customer/recover',{cpfCnpj:'12345678909'})).status,200);assert.equal(f.calls.filter(c=>c.method==='POST').length,1);}));
 
 test('normal application stays inert and sandbox cannot use production or mismatched account scope',async()=>fixture(async f=>{await assert.rejects(()=>asaasRuntime({store:f.store,security:{production:true},configuration:f.config}),{status:503});await assert.rejects(()=>asaasRuntime({store:f.store,security:{production:false},configuration:{...f.config,accountId:'other'}}),{status:503});assert.equal(await asaasRuntime({configuration:{}}),null);assert.throws(()=>applyAsaasRuntimeSchema(f.store,{isolatedSandbox:false}));}));
 
@@ -89,14 +144,14 @@ test('existing admin invitation activates a new sandbox identity without grantin
  const invite=await a.req('invitations',{kind:'student',studentId:id,email:'newbuyer@fixture.invalid',name:'Synthetic new buyer',professionalRole:null,verifiedDelivery:true});assert.equal(invite.status,201);
  assert.equal((await s.req('activate',{token:invite.data.token,email:'newbuyer@fixture.invalid',password:FIXTURE_PASSWORD})).status,201);
  assert.equal((await s.req('login',{email:'newbuyer@fixture.invalid',password:FIXTURE_PASSWORD})).status,200);assert.equal((await s.req('students')).status,403);
- assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,200);assert.equal((await s.req('students')).status,403);
+ assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture})).status,200);assert.equal((await s.req('students')).status,403);
  assert.equal((await s.req('activate',{token:invite.data.token,email:'newbuyer@fixture.invalid',password:FIXTURE_PASSWORD})).status,400);await f.restart(true);assert.equal((await s.req('students')).status,403);
 }));
 
 
 test('definitive checkout refusal preserves order, audit and idempotency without another provider POST',async()=>fixture(async f=>{
  const s=f.client();await s.login('student');
- await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true});
+ await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
  const body={sku:'monthly',billingType:'PIX',confirmed:true},headers={'Idempotency-Key':'refusal-fixture'};
  const created=await s.req('asaas/orders',body,'POST',headers),id=created.data.orderId;
  f.checkoutResponse(()=>Response.json({errors:[{code:'invalid_object',description:'PRIVATE provider detail must never be stored'}]},{status:400}));
@@ -114,7 +169,7 @@ test('definitive checkout refusal preserves order, audit and idempotency without
 
 test('lost checkout response remains unknown and can recover only through authenticated matching webhook',async()=>fixture(async f=>{
  const s=f.client(),a=f.client();await s.login('student');await a.login('admin');
- await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true});
+ await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
  const id=(await s.req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).data.orderId;
  f.checkoutResponse(()=>{throw Error('lost response after possible provider creation');});
  assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,503);
@@ -131,7 +186,7 @@ test('lost checkout response remains unknown and can recover only through authen
 
 
 test('operator recovery is dry by default, evidence-bound, atomic and single-use without provider writes',async()=>fixture(async f=>{
- const s=f.client();await s.login('student');await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true});
+ const s=f.client();await s.login('student');await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true,...profileFixture});
  const body={sku:'monthly',billingType:'PIX',confirmed:true},headers={'Idempotency-Key':'recover-original'};
  const id=(await s.req('asaas/orders',body,'POST',headers)).data.orderId;
  f.checkoutResponse(()=>{throw Error('old deployment discarded refusal details');});await s.req('asaas/orders/'+id+'/checkout',{});

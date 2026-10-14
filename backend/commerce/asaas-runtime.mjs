@@ -8,6 +8,7 @@ import {protocolPeriod,renewalNotice} from './manual-period.mjs';
 import {refundWindow} from './refund-window.mjs';
 import {COMMERCE_SOURCE_MARKER} from '../access-policy.mjs';
 import {assertRequest} from '../security.mjs';
+import {FINANCIAL_FIELDS,financialFields,financialStatus} from './customer-profile.mjs';
 
 // Actual application sessions, application DB and Asaas HTTP client. No fixture identities.
 // Explicit sandbox activation only; no automatic migration or secret discovery.
@@ -33,7 +34,7 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
  const core=asaasSandboxCommerce({...configuration,store,client,now,offers,resolvePrincipal:principal,proveIdentity:async()=>{throw commerceError(403,'Use a sessao do aplicativo.');},resolveAdmin:async req=>({userId:(await actor(req,'admin')).id}),manualRenewalGuard:renewalGuard});
  const webhook=asaasWebhookHandler({capabilities:{enabled:true},acceptWebhook:core.acceptWebhook});
  async function customer(req,body){
-  exactFields(body,['cpfCnpj','confirmed']);if(body.confirmed!==true||typeof body.cpfCnpj!=='string'||!/^(?:\d{11}|\d{14})$/.test(body.cpfCnpj))throw commerceError(400,'Confirme o cadastro financeiro.');
+  exactFields(body,['cpfCnpj','confirmed',...FINANCIAL_FIELDS]);const profile=financialFields(body);if(body.confirmed!==true||typeof body.cpfCnpj!=='string'||!/^(?:\d{11}|\d{14})$/.test(body.cpfCnpj))throw commerceError(400,'Confirme o cadastro financeiro.');
   const u=await actor(req,'student'),student=await store.get('SELECT * FROM students WHERE user_id=? AND org_id=?',u.id,u.org_id);if(!student)throw commerceError(409,'Cadastro do aluno obrigatorio.');
   const fingerprint=createHash('sha256').update(u.id+'\0'+u.email+'\0'+body.cpfCnpj).digest('hex');let intent,claimed=false;
   await store.transaction(async()=>{await actor(req,'student');intent=await store.get('SELECT * FROM asaas_customer_intents WHERE user_id=?',u.id);if(intent){if(intent.fingerprint!==fingerprint)throw commerceError(409,'Cadastro financeiro mudou; revisao necessaria.');return;}
@@ -42,7 +43,7 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
    intent={reference:randomUUID(),state:'creating'};await store.run('INSERT INTO asaas_customer_intents VALUES (?,?,?,?,?,NULL)',u.id,u.org_id,intent.reference,fingerprint,'creating');claimed=true;});
   if(intent.state==='ready')return {registered:true};
   if(!claimed)throw commerceError(409,'Cadastro inconclusivo; use recuperacao, sem novo envio.');
-  try{const matches=await client.customersByReference(intent.reference);if(matches.length)throw commerceError(409,'Referencia existente exige recuperacao.');const result=await client.createCustomer({name:u.name,email:u.email,cpfCnpj:body.cpfCnpj,externalReference:intent.reference,notificationDisabled:true});await bindCustomer(u,student,result.id,intent.reference);return {registered:true};}
+  try{const matches=await client.customersByReference(intent.reference);if(matches.length)throw commerceError(409,'Referencia existente exige recuperacao.');const result=await client.createCustomer({name:u.name,email:u.email,cpfCnpj:body.cpfCnpj,externalReference:intent.reference,notificationDisabled:true,...profile});await bindCustomer(u,student,result.id,intent.reference);return {registered:true};}
   catch{await store.run("UPDATE asaas_customer_intents SET state='unknown' WHERE user_id=? AND state='creating'",u.id);throw commerceError(503,'Cadastro inconclusivo; nao repetir criacao.');}
  }
  async function bindCustomer(u,student,customerId,reference){await store.transaction(async()=>{
@@ -58,6 +59,35 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
   const rows=await client.customersByReference(intent.reference);if(rows.length!==1||rows[0].email!==u.email||rows[0].cpfCnpj?.replace(/\D/g,'')!==body.cpfCnpj)throw commerceError(409,'Cadastro ainda inconclusivo; revisao necessaria.');
   await bindCustomer(u,await store.get('SELECT * FROM students WHERE user_id=? AND org_id=?',u.id,u.org_id),rows[0].id,intent.reference);return {registered:true};
  }
+
+ // Read provider data only for the customer already bound to this signed-in user.
+ async function customerProfile(req){
+  const u=await actor(req,'student');
+  const b=await store.get('SELECT * FROM commerce_buyers WHERE user_id=? AND org_id=? AND active=1',u.id,u.org_id);
+  const intent=await store.get('SELECT * FROM asaas_customer_intents WHERE user_id=?',u.id);
+  if(!b||!intent||intent.state!=='ready'||intent.customer_id!==b.customer_id||b.account_id!==scope.account_id||b.environment!=='sandbox')throw commerceError(409,'Cadastro financeiro não vinculado.');
+  const c=await client.customerById(b.customer_id);
+  const fingerprint=createHash('sha256').update(u.id+'\0'+u.email+'\0'+String(c.cpfCnpj||'').replace(/\D/g,'')).digest('hex');
+  if(c.externalReference!==intent.reference||c.email!==u.email||fingerprint!==intent.fingerprint)throw commerceError(409,'Identidade financeira divergente.');
+  return {buyer:b,customer:c,status:financialStatus(c)};
+ }
+ async function updateCustomerProfile(req,body){
+  exactFields(body,[...FINANCIAL_FIELDS,'confirmed']);if(body.confirmed!==true)throw commerceError(400,'Confirme os dados fictícios.');
+  const fields=financialFields(body);
+  return store.transaction(async()=>{
+   const before=await customerProfile(req);
+   if(await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND (checkout_state IN ('creating','unknown','ready') OR status='paid')",before.buyer.id))throw commerceError(409,'Checkout existente exige revisão antes de alterar o cadastro.');
+   // Absolute PUT on the same customer; never create a replacement or resend automatically.
+   await client.updateCustomer(before.buyer.customer_id,{...fields,notificationDisabled:true});
+   const after=await customerProfile(req);
+   // Asaas may canonicalize street/neighborhood from the CEP; verify the submitted
+   // phone, number and CEP, plus the completeness of its returned address/city.
+   const returned=after.status.ready?financialFields(after.customer):null;
+   if(!returned||['phone','addressNumber','postalCode'].some(k=>returned[k]!==fields[k]))throw commerceError(409,'Cadastro retornado pelo Asaas requer revisão. Nenhum checkout foi enviado.');
+   return {registered:true,financialProfile:after.status};
+  });
+ }
+
  async function accessState(row){if(row.org_id!==scope.org_id)return null;const source=await store.get('SELECT buyer_id FROM asaas_student_sources WHERE student_id=?',row.id);if(!source)return {mode:'commerce',source:'payment',active:false,sequence:0,level:null,expiresAt:null,features:{training:false,nutrition:false}};
   const orders=await store.all('SELECT o.id,o.status,e.onboarding_authorized FROM commerce_orders o JOIN commerce_entitlements e ON e.order_id=o.id JOIN commerce_buyers b ON b.id=o.buyer_id WHERE b.id=? AND b.user_id=? AND b.org_id=? AND b.active=1',source.buyer_id,row.user_id,row.org_id);
   const valid=orders.filter(o=>o.status==='paid'&&o.onboarding_authorized===1),periods=await store.all('SELECT * FROM asaas_service_periods WHERE student_id=? ORDER BY ends_at DESC',row.id),current=periods.find(p=>valid.some(o=>o.id===p.order_id)&&p.starts_at<=now()&&p.ends_at>now()),pending=valid.some(o=>!periods.some(p=>p.order_id===o.id));
@@ -79,12 +109,13 @@ await store.transaction(async()=>{for(const row of await store.all('SELECT * FRO
 async function processBatch(){let processed=0;const exclude=new Set();while(processed<20&&await core.processNext({exclude}))processed++;return {processed};}
  async function handle(req,route){if(!route.startsWith('/api/local/asaas/'))return null;const u=await actor(req),prefix='/api/local/asaas';
   if(route===prefix+'/customer'&&req.method==='POST')return {status:200,data:await customer(req,await read(req))};
+  if(route===prefix+'/customer/profile'&&req.method==='PUT')return {status:200,data:await updateCustomerProfile(req,await read(req))};
   if(route===prefix+'/customer/recover'&&req.method==='POST')return {status:200,data:await recoverCustomer(req,await read(req))};
   if(route===prefix+'/process'&&req.method==='POST'){await actor(req,'admin');exactFields(await read(req),[]);return {status:200,data:await processBatch()};}
   if(route===prefix+'/orders'&&req.method==='POST'){const b=await read(req);exactFields(b,['sku','billingType','confirmed']);if(b.confirmed!==true)throw commerceError(400,'Confirme a nova compra.');const o=await core.createOrder(req,{sku:b.sku,billingType:b.billingType},req.headers['idempotency-key']);return {status:201,data:await orderSummary(req,o.id)};}
-  if(route===prefix+'/account'&&req.method==='GET'){const p=await principal(req);if(!p)return {status:200,data:{registered:false,orders:[]}};const rows=await store.all('SELECT o.*,e.created_at AS paid_at FROM commerce_orders o LEFT JOIN commerce_entitlements e ON e.order_id=o.id WHERE o.buyer_id=? ORDER BY o.created_at',p.buyerId);return {status:200,data:{registered:true,automaticRenewal:false,orders:await Promise.all(rows.map(async o=>{const period=await store.get('SELECT starts_at,ends_at FROM asaas_service_periods WHERE order_id=?',o.id);return {...await orderSummary(req,o.id),periodPolicyPending:false,protocolPublished:!!period,period:period||null,refundWindow:refundWindow(o.paid_at,now()),notice:renewalNotice(period?.ends_at,now())};}))}};}
+  if(route===prefix+'/account'&&req.method==='GET'){const p=await principal(req);if(!p)return {status:200,data:{registered:false,orders:[]}};const rows=await store.all('SELECT o.*,e.created_at AS paid_at FROM commerce_orders o LEFT JOIN commerce_entitlements e ON e.order_id=o.id WHERE o.buyer_id=? ORDER BY o.created_at',p.buyerId);return {status:200,data:{registered:true,financialProfile:(await customerProfile(req)).status,automaticRenewal:false,orders:await Promise.all(rows.map(async o=>{const period=await store.get('SELECT starts_at,ends_at FROM asaas_service_periods WHERE order_id=?',o.id);return {...await orderSummary(req,o.id),periodPolicyPending:false,protocolPublished:!!period,period:period||null,refundWindow:refundWindow(o.paid_at,now()),notice:renewalNotice(period?.ends_at,now())};}))}};}
   const m=/^\/api\/local\/asaas\/orders\/([a-f0-9-]{36})\/(checkout|protocol|request)$/.exec(route);
-  if(m&&req.method==='POST'){const body=await read(req);if(m[2]==='checkout'){exactFields(body,[]);const o=await core.createCheckout(req,m[1]);return {status:200,data:{orderId:o.id,checkoutUrl:client.hostedCheckoutUrl(o.checkout_id)}};}
+  if(m&&req.method==='POST'){const body=await read(req);if(m[2]==='checkout'){exactFields(body,[]);await core.summary(req,m[1]);if(!(await customerProfile(req)).status.ready)throw commerceError(409,'Complete o cadastro financeiro antes de preparar o checkout.');const o=await core.createCheckout(req,m[1]);return {status:200,data:{orderId:o.id,checkoutUrl:client.hostedCheckoutUrl(o.checkout_id)}};}
    if(m[2]==='request'){exactFields(body,['kind','confirmed']);if(body.confirmed!==true||!['refund','cancel-purchase'].includes(body.kind))throw commerceError(400,'Confirme a solicitacao.');await core.summary(req,m[1]);const e=await store.get('SELECT created_at FROM commerce_entitlements WHERE order_id=?',m[1]);await store.run('INSERT INTO asaas_purchase_requests VALUES (?,?,?,?) ON CONFLICT(order_id,kind) DO NOTHING',m[1],body.kind,now(),refundWindow(e?.created_at,now()).status);return {status:202,data:{recorded:true,providerActionPerformed:false}};}
    exactFields(body,['planId','kind']);const kind=body.kind||'training';if(!['training','nutrition'].includes(kind))throw commerceError(400,'Tipo de protocolo invalido.');const nutrition=kind==='nutrition';if(!['admin','coach','nutrition'].includes(u.role))throw commerceError(403,'Profissional obrigatorio.');
    await store.transaction(async()=>{const current=await actor(req);const o=await store.get('SELECT o.*,s.student_id FROM commerce_orders o JOIN asaas_student_sources s ON s.buyer_id=o.buyer_id WHERE o.id=? AND o.org_id=?',m[1],u.org_id);if(!o)throw commerceError(404,'Compra indisponivel.');await store.lockStudent(o.student_id);const row=await store.get('SELECT * FROM students WHERE id=? AND org_id=?',o.student_id,u.org_id);if(!(nutrition?current.role==='nutrition'&&row.nutrition_id===current.id:current.role==='admin'||current.role==='coach'&&row.coach_id===current.id))throw commerceError(403,'Profissional responsavel obrigatorio.');const plan=await store.get('SELECT * FROM '+(nutrition?'nutrition_plans':'plans')+' WHERE id=? AND student_id=?',body.planId,row.id);if(!plan||plan.status==='published')throw commerceError(409,'Selecione protocolo ainda nao publicado.');const old=await store.get('SELECT * FROM asaas_protocol_orders WHERE order_id=?',o.id);if(old&&(nutrition?old.nutrition_plan_id:old.plan_id)!==plan.id)throw commerceError(409,'Compra ja vinculada a outro protocolo.');await store.run('INSERT INTO asaas_protocol_orders VALUES (?,?,?,?) ON CONFLICT(order_id) DO NOTHING',o.id,row.id,nutrition?null:plan.id,nutrition?plan.id:null);});return {status:200,data:{bound:true}};

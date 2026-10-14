@@ -1,4 +1,5 @@
 import {commerceError,exactFields} from './catalog.mjs';
+import {FINANCIAL_FIELDS,financialUpdate} from './customer-profile.mjs';
 
 // Backend-only. No environment/file reads, constructor requests, arbitrary hosts or retries.
 const clients=new WeakSet();
@@ -66,9 +67,22 @@ export function asaasSandboxClient({enabled=false,environment='sandbox',accountI
  }
  const client=Object.freeze({kind:'asaas',scope:Object.freeze({environment:'sandbox',accountId}),
   async createCustomer(body){
-   exactFields(body,['name','email','cpfCnpj','externalReference','notificationDisabled']);
+   exactFields(body,['name','email','cpfCnpj','externalReference','notificationDisabled',...FINANCIAL_FIELDS]);
+   financialUpdate(Object.fromEntries([...FINANCIAL_FIELDS,'notificationDisabled'].map(k=>[k,body[k]])));
    if(typeof body.name!=='string'||body.name.length<2||body.name.length>100||typeof body.email!=='string'||! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)||! /^(?:\d{11}|\d{14})$/.test(body.cpfCnpj)||!resourceId(body.externalReference)||body.notificationDisabled!==true)throw commerceError(400,'Cadastro financeiro invalido.');
    const data=await request('POST','/customers',body);if(!resourceId(data?.id))throw unavailable();return {id:data.id};
+  },
+  async customerById(id){
+   if(!resourceId(id))throw commerceError(400,'Cliente inválido.');
+   const data=await request('GET','/customers/'+encodeURIComponent(id));
+   if(data?.id!==id||data.deleted)throw unavailable();
+   // Internal use only: callers expose financialStatus, never document/contact data.
+   return Object.fromEntries(['id','email','cpfCnpj','externalReference','notificationDisabled','city','cityName',...FINANCIAL_FIELDS].map(k=>[k,data[k]]));
+  },
+  async updateCustomer(id,body){
+   if(!resourceId(id))throw commerceError(400,'Cliente inválido.');
+   const data=await request('PUT','/customers/'+encodeURIComponent(id),financialUpdate(body));
+   if(data?.id!==id)throw unavailable();return {id};
   },
   async customersByReference(reference){if(!resourceId(reference))throw commerceError(400,'Referencia invalida.');const data=await request('GET','/customers?'+new URLSearchParams({externalReference:reference,limit:'100',offset:'0'}));if(!Array.isArray(data?.data)||data.hasMore!==false||data.data.length>1)throw unavailable();return data.data.map(r=>{if(!resourceId(r.id)||r.externalReference!==reference||r.deleted)throw unavailable();return {id:r.id,email:r.email,cpfCnpj:r.cpfCnpj,externalReference:r.externalReference};});},
   async createCheckout(body){assertCheckout(body);const data=await request('POST','/checkouts',body);if(!resourceId(data?.id))throw unavailable();return {id:data.id};},
