@@ -2,13 +2,15 @@ import {commerceError,exactFields} from './catalog.mjs';
 
 // Backend-only. No environment/file reads, constructor requests, arbitrary hosts or retries.
 const clients=new WeakSet();
+const checkoutRejections=new WeakSet();
+export const isDefinitiveCheckoutRejection=error=>checkoutRejections.has(error);
 const API='https://api-sandbox.asaas.com/v3';
 const resourceId=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(value);
 const unavailable=()=>commerceError(503,'Resposta Asaas inconclusiva; consulte a conciliação antes de repetir.');
 export const isAsaasSandboxClient=client=>clients.has(client);
 
 async function boundedJSON(response,signal){
- if(!response.ok||response.redirected)throw unavailable();
+ if(response.redirected)throw unavailable();
  const reader=response.body?.getReader();if(!reader)throw unavailable();
  const chunks=[];let size=0;
  try{for(;;){if(signal.aborted)throw unavailable();const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>1024*1024)throw unavailable();chunks.push(Buffer.from(value));}
@@ -41,8 +43,19 @@ export function asaasSandboxClient({enabled=false,environment='sandbox',accountI
  if(!resourceId(accountId)||typeof apiKey!=='string'||apiKey.length<32||apiKey.length>512||/[\r\n]/.test(apiKey)||typeof fetchImpl!=='function'||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)throw commerceError(503,'Configuração Asaas incompleta.');
  async function request(method,path,body){
   const abort=new AbortController();let timer;
-  try{return await Promise.race([(async()=>{const response=await fetchImpl(API+path,{method,redirect:'error',signal:abort.signal,headers:{access_token:apiKey,'Content-Type':'application/json','User-Agent':'ShapeIsMoney/AsaasPreparation'},...(body?{body:JSON.stringify(body)}:{})});return boundedJSON(response,abort.signal);})(),new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(unavailable());},timeoutMs);})]);}
-  catch{throw unavailable();}finally{clearTimeout(timer);abort.abort();}
+  try{return await Promise.race([(async()=>{const response=await fetchImpl(API+path,{method,redirect:'error',signal:abort.signal,headers:{access_token:apiKey,'Content-Type':'application/json','User-Agent':'ShapeIsMoney/AsaasPreparation'},...(body?{body:JSON.stringify(body)}:{})});
+   const data=await boundedJSON(response,abort.signal);
+   if(!response.ok){
+    // Only a complete, structured validation refusal from the checkout endpoint is
+    // definitive. Never retain provider descriptions, which may contain personal data.
+    if(method==='POST'&&path==='/checkouts'&&response.status===400&&/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type')||'')&&data&&Object.keys(data).length===1&&Array.isArray(data.errors)&&data.errors.length>0&&data.errors.length<=20&&data.errors.every(e=>e?.code==='invalid_object')){
+     const error=commerceError(422,'Checkout recusado pelo Asaas. Revise a configuração antes de autorizar outra tentativa.');checkoutRejections.add(error);throw error;
+    }
+    throw unavailable();
+   }
+   return data;
+  })(),new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject(unavailable());},timeoutMs);})]);}
+  catch(error){if(checkoutRejections.has(error))throw error;throw unavailable();}finally{clearTimeout(timer);abort.abort();}
  }
  async function payments(filter){const all=[];let offset=0;const seen=new Set();
   for(let page=0;page<20;page++){const data=await request('GET','/payments?'+new URLSearchParams({...filter,offset:String(offset),limit:'100'}));

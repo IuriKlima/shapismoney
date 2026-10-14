@@ -1,3 +1,5 @@
+import {recoverRejectedCheckout} from '../backend/commerce/checkout-recovery.mjs';
+import {asyncLocalStore} from '../backend/async-store.mjs';
 import {sandboxSecurity} from '../backend/security.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,14 +11,14 @@ import {asaasRuntime} from '../backend/commerce/asaas-runtime.mjs';
 import {INTAKE_VERSION,CONSENT_VERSION} from '../public/sim/intake-fields.js';
 import {fullIntakeAnswers} from './intake-test-fixtures.mjs';
 const apiKey='synthetic-api-never-real-00000000000000000',webhookToken='synthetic-hook-never-real-1111111111111111';
-async function fixture(work,{proxy=false}={}){const f=await isolatedFixture(),orgId=f.store.get('SELECT org_id FROM users WHERE id=?',f.ids.student).org_id,accountId='synthetic-runtime';applyAsaasRuntimeSchema(f.store,{isolatedSandbox:true,accountId,orgId});let clock=Date.parse('2026-10-12T15:00:00Z'),app,origin,timeoutCustomer=false;const calls=[],customers=new Map(),payments=new Map();
- const config={enabled:true,isolatedSandbox:true,environment:'sandbox',networkAccessApproved:true,accountId,orgId,apiKey,webhookToken,publicOrigin:'https://sandbox.fixture.invalid',fetchImpl:async(url,options)=>{assert.equal(new URL(url).origin,'https://api-sandbox.asaas.com');calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});const parsed=new URL(url);if(parsed.pathname.endsWith('/customers')){if(options.method==='POST'){const b=JSON.parse(options.body),id='cus_'+b.externalReference;customers.set(b.externalReference,{...b,id});if(timeoutCustomer)throw Error('uncertain');return Response.json({id});}return Response.json({hasMore:false,data:[customers.get(parsed.searchParams.get('externalReference'))].filter(Boolean)});}if(options.method==='POST')return Response.json({id:'checkout_'+JSON.parse(options.body).externalReference});return Response.json({hasMore:false,data:payments.get(parsed.searchParams.get('checkoutSession'))||[]});}};
+async function fixture(work,{proxy=false}={}){const f=await isolatedFixture(),orgId=f.store.get('SELECT org_id FROM users WHERE id=?',f.ids.student).org_id,accountId='synthetic-runtime';applyAsaasRuntimeSchema(f.store,{isolatedSandbox:true,accountId,orgId});let clock=Date.parse('2026-10-12T15:00:00Z'),app,origin,timeoutCustomer=false,checkoutResponse=null;const calls=[],customers=new Map(),payments=new Map();
+ const config={enabled:true,isolatedSandbox:true,environment:'sandbox',networkAccessApproved:true,accountId,orgId,apiKey,webhookToken,publicOrigin:'https://sandbox.fixture.invalid',fetchImpl:async(url,options)=>{assert.equal(new URL(url).origin,'https://api-sandbox.asaas.com');calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});const parsed=new URL(url);if(parsed.pathname.endsWith('/customers')){if(options.method==='POST'){const b=JSON.parse(options.body),id='cus_'+b.externalReference;customers.set(b.externalReference,{...b,id});if(timeoutCustomer)throw Error('uncertain');return Response.json({id});}return Response.json({hasMore:false,data:[customers.get(parsed.searchParams.get('externalReference'))].filter(Boolean)});}if(options.method==='POST'&&checkoutResponse)return checkoutResponse();if(options.method==='POST')return Response.json({id:'checkout_'+JSON.parse(options.body).externalReference});return Response.json({hasMore:false,data:payments.get(parsed.searchParams.get('checkoutSession'))||[]});}};
  const security=proxy?sandboxSecurity({SIM_PUBLIC_ORIGIN:'https://sandbox.example.test',SIM_TRUSTED_PROXY_IPS:'127.0.0.1',SIM_STAGING_CLIENT_IPS:'192.0.2.10'}):undefined;const proxyHeaders=proxy?{'x-forwarded-host':'sandbox.example.test','x-forwarded-proto':'https','x-forwarded-for':'192.0.2.10'}:{};
  async function start(store){app=await createLocalServer({security,store,filename:f.filename,now:()=>clock,sessionMs:365*86400000,asaas:config});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+app.server.address().port;if(security)security.upstreamHost=new URL(origin).host;}
  await start(f.store);
  function client(){let cookie='';return {async req(route,body,method='POST',headers={}){const r=await fetch(origin+'/api/local/'+route,{method:body===undefined?'GET':method,headers:{...proxyHeaders,Cookie:cookie,Origin:security?.origin||origin,'Content-Type':'application/json','Idempotency-Key':randomUUID(),...headers},body:body===undefined?undefined:JSON.stringify(body)});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};},login(role){return this.req('login',{email:role.toLowerCase()+'@fixture.invalid',password:FIXTURE_PASSWORD});}};}
  async function notify(o,event='CHECKOUT_PAID',token=webhookToken,id=randomUUID()){const r=await fetch(origin+'/api/asaas/webhook',{method:'POST',headers:{...proxyHeaders,...(proxy?{'x-forwarded-for':'198.51.100.20'}:{}),'Content-Type':'application/json','asaas-access-token':token},body:JSON.stringify({id,event,account:{id:accountId},checkout:{id:o.checkout_id,customer:o.customer_id,externalReference:o.id}})});return r.status;}
- try{await work({...f,config,client,calls,customers,payments,notify,get store(){return app.store;},get origin(){return origin;},clock:()=>clock,advance:ms=>{clock+=ms;},customerTimeout:()=>{timeoutCustomer=true;},async restart(disabled=false){await app.close();config.enabled=!disabled;await start();}});}finally{await app.close();}
+ try{await work({...f,config,client,calls,customers,payments,notify,get store(){return app.store;},get origin(){return origin;},clock:()=>clock,advance:ms=>{clock+=ms;},customerTimeout:()=>{timeoutCustomer=true;},checkoutResponse:value=>{checkoutResponse=value;},async restart(disabled=false){await app.close();config.enabled=!disabled;await start();}});}finally{await app.close();}
 }
 const prepare=async(f,s)=>{assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,200);const r=await s.req('asaas/orders',{sku:'quarterly',billingType:'PIX',confirmed:true});assert.equal(r.status,201,JSON.stringify(r));const id=r.data.orderId;assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,200);return f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);};
 const settle=async(f,a,o)=>{f.payments.set(o.checkout_id,[{id:'pay_'+o.id,customer:o.customer_id,externalReference:o.id,billingType:o.billing_type,value:o.amount_cents/100,status:'RECEIVED'}]);assert.equal(await f.notify(o),200);assert.equal((await a.req('asaas/process',{})).status,200);};
@@ -89,4 +91,62 @@ test('existing admin invitation activates a new sandbox identity without grantin
  assert.equal((await s.req('login',{email:'newbuyer@fixture.invalid',password:FIXTURE_PASSWORD})).status,200);assert.equal((await s.req('students')).status,403);
  assert.equal((await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true})).status,200);assert.equal((await s.req('students')).status,403);
  assert.equal((await s.req('activate',{token:invite.data.token,email:'newbuyer@fixture.invalid',password:FIXTURE_PASSWORD})).status,400);await f.restart(true);assert.equal((await s.req('students')).status,403);
+}));
+
+
+test('definitive checkout refusal preserves order, audit and idempotency without another provider POST',async()=>fixture(async f=>{
+ const s=f.client();await s.login('student');
+ await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true});
+ const body={sku:'monthly',billingType:'PIX',confirmed:true},headers={'Idempotency-Key':'refusal-fixture'};
+ const created=await s.req('asaas/orders',body,'POST',headers),id=created.data.orderId;
+ f.checkoutResponse(()=>Response.json({errors:[{code:'invalid_object',description:'PRIVATE provider detail must never be stored'}]},{status:400}));
+ const result=await s.req('asaas/orders/'+id+'/checkout',{});assert.equal(result.status,422);assert.ok(!JSON.stringify(result).includes('PRIVATE'));
+ const order=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);assert.equal(order.status,'review');assert.equal(order.checkout_state,'new');assert.equal(order.checkout_id,null);
+ assert.equal((await s.req('asaas/orders',body,'POST',headers)).data.orderId,id);
+ await f.restart();await s.login('student');
+ const retries=await Promise.all([s.req('asaas/orders/'+id+'/checkout',{}),s.req('asaas/orders/'+id+'/checkout',{})]);assert.deepEqual(retries.map(r=>r.status),[409,409]);
+ assert.equal((await s.req('asaas/orders',body)).status,409);
+ assert.equal(f.calls.filter(c=>c.method==='POST'&&c.url.endsWith('/checkouts')).length,1);
+ const audit=f.store.all('SELECT event FROM commerce_audit WHERE order_id=?',id);assert.equal(audit.filter(r=>r.event==='commerce.checkout.rejected.http400.invalid_object').length,1);assert.ok(!JSON.stringify(audit).includes('PRIVATE'));
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_orders').n,1);assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_tasks WHERE order_id=? AND kind=?',id,'financial-review').n,1);
+}));
+
+test('lost checkout response remains unknown and can recover only through authenticated matching webhook',async()=>fixture(async f=>{
+ const s=f.client(),a=f.client();await s.login('student');await a.login('admin');
+ await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true});
+ const id=(await s.req('asaas/orders',{sku:'monthly',billingType:'PIX',confirmed:true})).data.orderId;
+ f.checkoutResponse(()=>{throw Error('lost response after possible provider creation');});
+ assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,503);
+ let o=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);assert.equal(o.status,'pending');assert.equal(o.checkout_state,'unknown');
+ assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,409);
+ o={...o,checkout_id:'checkout_recovered'};
+ assert.equal(await f.notify(o,'CHECKOUT_CREATED','wrong'),401);assert.equal(await f.notify(o,'CHECKOUT_CREATED'),200);
+ await a.req('asaas/process',{});
+ assert.equal(f.store.get('SELECT checkout_state FROM commerce_orders WHERE id=?',id).checkout_state,'ready');
+ assert.equal((await s.req('asaas/orders/'+id+'/checkout',{})).status,200);
+ assert.equal(f.calls.filter(c=>c.method==='POST'&&c.url.endsWith('/checkouts')).length,1);
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);
+}));
+
+
+test('operator recovery is dry by default, evidence-bound, atomic and single-use without provider writes',async()=>fixture(async f=>{
+ const s=f.client();await s.login('student');await s.req('asaas/customer',{cpfCnpj:'12345678909',confirmed:true});
+ const body={sku:'monthly',billingType:'PIX',confirmed:true},headers={'Idempotency-Key':'recover-original'};
+ const id=(await s.req('asaas/orders',body,'POST',headers)).data.orderId;
+ f.checkoutResponse(()=>{throw Error('old deployment discarded refusal details');});await s.req('asaas/orders/'+id+'/checkout',{});
+ const old=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id),store=asyncLocalStore(f.store),calls=f.calls.length;
+ const evidence={logId:'12345',orderId:id,externalReference:old.external_reference,customerId:old.customer_id,accountId:old.account_id,environment:'sandbox',method:'POST',path:'/api/v3/checkouts',httpStatus:400,code:'invalid_object',reason:'missing-pix-key',responseHasResource:false,reviewedLog:true,singleAttemptConfirmed:true,checkoutAbsenceBasis:'provider-validation-rejection',checkedAt:f.clock(),paymentsHttpStatus:200,paymentsComplete:true,paymentCount:0,activePixKey:true};
+ const args={store,orderId:id,actorId:f.ids.admin,accountId:old.account_id,orgId:old.org_id,expectedRevision:old.revision,expectedUpdatedAt:old.updated_at,evidence,now:f.clock};
+ assert.equal((await recoverRejectedCheckout(args)).dryRun,true);assert.equal(f.store.get('SELECT checkout_state FROM commerce_orders WHERE id=?',id).checkout_state,'unknown');
+ await assert.rejects(recoverRejectedCheckout({...args,apply:true}),e=>e.status===403);
+ for(const change of [{paymentCount:1},{paymentsComplete:false},{paymentsHttpStatus:500},{activePixKey:false},{checkedAt:f.clock()-60001},{responseHasResource:true},{singleAttemptConfirmed:false},{httpStatus:503},{customerId:'other'},{checkoutAbsenceBasis:'empty-payment-list'}])await assert.rejects(recoverRejectedCheckout({...args,evidence:{...evidence,...change},apply:true,approved:true}),e=>e.status===409);
+ await assert.rejects(recoverRejectedCheckout({...args,actorId:f.ids.student}),e=>e.status===409);
+ await assert.rejects(recoverRejectedCheckout({...args,expectedRevision:old.revision+1}),e=>e.status===409);
+ await f.notify({...old,checkout_id:'unexpected'},'CHECKOUT_CREATED');await assert.rejects(recoverRejectedCheckout(args),e=>e.status===409);f.store.run('DELETE FROM commerce_events');
+ f.store.exec("CREATE TRIGGER recovery_audit_failure BEFORE INSERT ON commerce_audit WHEN NEW.event LIKE 'commerce.checkout.recovery-evidence:%' BEGIN SELECT RAISE(ABORT,'atomic recovery test'); END");
+ await assert.rejects(recoverRejectedCheckout({...args,apply:true,approved:true}));assert.equal(f.store.get('SELECT revision FROM commerce_orders WHERE id=?',id).revision,old.revision);assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_audit WHERE event=?','commerce.checkout.retry-authorized:12345').n,0);f.store.exec('DROP TRIGGER recovery_audit_failure');
+ const results=await Promise.all([recoverRejectedCheckout({...args,apply:true,approved:true}),recoverRejectedCheckout({...args,apply:true,approved:true})]);assert.equal(results.filter(r=>r.rearmed).length,1);assert.equal(results.filter(r=>r.alreadyRecorded).length,1);
+ const ready=f.store.get('SELECT * FROM commerce_orders WHERE id=?',id);assert.equal(ready.checkout_state,'new');assert.equal(ready.status,'pending');assert.equal(ready.idempotency_key,old.idempotency_key);assert.equal(ready.external_reference,old.external_reference);assert.equal(ready.revision,old.revision+1);assert.equal(f.calls.length,calls);
+ assert.equal((await s.req('asaas/orders',body,'POST',headers)).data.orderId,id);assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_orders').n,1);assert.equal(f.store.get('SELECT COUNT(*) n FROM commerce_entitlements').n,0);
 }));

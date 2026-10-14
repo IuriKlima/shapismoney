@@ -1,5 +1,5 @@
 import {createHash,randomUUID,timingSafeEqual} from 'node:crypto';
-import {isAsaasSandboxClient} from './asaas-client.mjs';
+import {isAsaasSandboxClient,isDefinitiveCheckoutRejection} from './asaas-client.mjs';
 import {compileAsaasOffers} from './asaas-policy.mjs';
 import {COMMERCE_CATALOG,commerceError,exactFields,purchaseSnapshot,checkoutBody,cents} from './catalog.mjs';
 
@@ -63,6 +63,7 @@ function commerceCore({store,client,resolvePrincipal,proveIdentity,resolveAdmin=
  async function reconcileRow(o,event=null){if(!o.checkout_id)throw commerceError(409,'Checkout inconclusivo; reconciliar antes de recriar.');let snapshot;try{snapshot=await paidSnapshot(o);}catch(error){if(error.status!==409)throw error;snapshot={status:'review',adverse:true,payments:[]};}if(sandbox&&event&&verifiedPaidEvents.has(event.event_type)&&!snapshot.adverse&&['pending','overdue'].includes(snapshot.status))throw commerceError(503,'Pagamento notificado ainda não conciliado.');await applySnapshot(o.id,snapshot,event);}
  async function createOrder(credential,body,key){exactFields(body,['sku','billingType']);if(!id(key))throw commerceError(400,'Chave de pedido obrigatória.');const snapshot=snapshotForSku(body.sku,{monthlyMode,billingType:body.billingType}),maxInstallments=body.billingType==='CREDIT_CARD'?(installmentLimits[body.sku]??null):null;
   const fingerprint=hash(JSON.stringify({snapshot,billingType:body.billingType,maxInstallments})).toString('hex');return store.transaction(async()=>{const first=await buyer(credential);await lock('commerce_buyers','id',first.id);const b=await buyer(credential);const old=await store.get('SELECT * FROM commerce_orders WHERE buyer_id=? AND idempotency_key=?',b.id,key);if(old){if(old.request_hash!==fingerprint)throw commerceError(409,'Chave reutilizada para outra compra.');return old;}
+   if(sandbox&&await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND status='review' AND checkout_id IS NULL",b.id))throw commerceError(409,'Checkout recusado exige revisao antes de outra compra.');
    if(sandbox&&manualRenewalGuard)await manualRenewalGuard(b);
    if(sandbox&&!manualRenewalGuard&&await store.get("SELECT id FROM commerce_orders WHERE buyer_id=? AND status='paid'",b.id))throw commerceError(503,'Renovação ainda não habilitada.');
    if(await store.get('SELECT id FROM commerce_orders WHERE buyer_id=? AND checkout_state IN (?,?)',b.id,'creating','unknown'))throw commerceError(409,'Compra anterior inconclusiva; reconciliar antes de iniciar outra cobrança.');
@@ -70,7 +71,27 @@ function commerceCore({store,client,resolvePrincipal,proveIdentity,resolveAdmin=
    await store.run('INSERT INTO commerce_orders(id,org_id,buyer_id,environment,account_id,customer_id,idempotency_key,request_hash,external_reference,amount_cents,currency,snapshot,billing_type,max_installments,checkout_state,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',orderId,b.org_id,b.id,environment,accountId,b.customer_id,key,fingerprint,orderId,snapshot.amountCents,'BRL',o.snapshot,body.billingType,maxInstallments,'new','pending',now(),now());await audit({...o,org_id:b.org_id},'commerce.order.created');return store.get('SELECT * FROM commerce_orders WHERE id=?',orderId);
   });}
  async function createCheckout(credential,orderId){let claimed=false;await store.transaction(async()=>{const initialBuyer=await buyer(credential);await lock('commerce_buyers','id',initialBuyer.id);const first=await ownOrder(credential,orderId);await lock('commerce_orders','id',first.id);const o=await ownOrder(credential,orderId);if(o.checkout_state==='ready')return;if(o.checkout_state!=='new'||o.status!=='pending')throw commerceError(409,'Checkout inconclusivo ou encerrado; não recriar cobrança.');if(await store.get('SELECT id FROM commerce_orders WHERE buyer_id=? AND id<>? AND checkout_state IN (?,?)',o.buyer_id,o.id,'creating','unknown'))throw commerceError(409,'Compra anterior inconclusiva; reconciliar antes de iniciar outra cobrança.');await store.run('UPDATE commerce_orders SET checkout_state=?,updated_at=? WHERE id=?','creating',now(),o.id);claimed=true;});if(!claimed)return ownOrder(credential,orderId);
-  const o=await ownOrder(credential,orderId);try{const result=await client.createCheckout(checkoutBody(o,{publicOrigin,billingType:o.billing_type,maxInstallmentCount:o.max_installments}));await store.transaction(async()=>{await lock('commerce_orders','id',o.id);const current=await store.get('SELECT * FROM commerce_orders WHERE id=?',o.id);if(current.checkout_id&&current.checkout_id!==result.id)throw commerceError(409,'Checkout divergente.');await store.run('UPDATE commerce_orders SET checkout_id=?,checkout_state=?,updated_at=? WHERE id=?',result.id,'ready',now(),o.id);await audit(o,'commerce.checkout.created');});}catch{await store.transaction(async()=>{await lock('commerce_orders','id',o.id);await store.run('UPDATE commerce_orders SET checkout_state=?,updated_at=? WHERE id=? AND checkout_id IS NULL','unknown',now(),o.id);});throw commerceError(503,'Criação inconclusiva. Não repetir; aguardando reconciliação.');}return ownOrder(credential,orderId);}
+  const o=await ownOrder(credential,orderId);try{const result=await client.createCheckout(checkoutBody(o,{publicOrigin,billingType:o.billing_type,maxInstallmentCount:o.max_installments}));await store.transaction(async()=>{await lock('commerce_orders','id',o.id);const current=await store.get('SELECT * FROM commerce_orders WHERE id=?',o.id);if(current.checkout_id&&current.checkout_id!==result.id)throw commerceError(409,'Checkout divergente.');await store.run('UPDATE commerce_orders SET checkout_id=?,checkout_state=?,updated_at=? WHERE id=?',result.id,'ready',now(),o.id);await audit(o,'commerce.checkout.created');});}catch(error){
+   const rejected=sandbox&&isDefinitiveCheckoutRejection(error);
+   await store.transaction(async()=>{
+    await lock('commerce_orders','id',o.id);
+    const current=await store.get('SELECT * FROM commerce_orders WHERE id=?',o.id);
+    if(current.checkout_id||current.checkout_state!=='creating')return;
+    if(rejected){
+     // Existing schema: new = no checkout, review = no retry until explicit recovery.
+     // Preserve the order and idempotency key; never retry automatically.
+     await store.run('UPDATE commerce_orders SET checkout_state=?,updated_at=? WHERE id=?','new',now(),o.id);
+     await changeStatus(current,'review');
+     await audit(o,'commerce.checkout.rejected.http400.invalid_object');
+     await task(o,'financial-review');
+    }else{
+     await store.run('UPDATE commerce_orders SET checkout_state=?,updated_at=? WHERE id=?','unknown',now(),o.id);
+     await audit(o,'commerce.checkout.unknown');
+    }
+   });
+   if(rejected)throw error;
+   throw commerceError(503,'Criacao inconclusiva. Nao repetir; aguardando reconciliacao.');
+  }return ownOrder(credential,orderId);}
  async function acceptWebhook({headers,rawBody}){const token=headers?.['asaas-access-token'];if(typeof token!=='string'||token.length>255||!timingSafeEqual(hash(token),hash(webhookToken)))throw commerceError(401,'Notificação não autenticada.');if(typeof rawBody!=='string'||Buffer.byteLength(rawBody)>131072)throw commerceError(413,'Notificação excedeu limite.');let payload;try{payload=JSON.parse(rawBody);}catch{throw commerceError(400,'Notificação inválida.');}if(!id(payload?.id)||!id(payload?.event)||! /^[A-Z_]+$/.test(payload.event)||payload.account?.id!==accountId)throw commerceError(400,'Escopo da notificação inválido.');
   // Strict allowlist: card tokens, customerData, URLs and all raw payload are discarded.
   const c=payload.checkout,p=payload.payment,e={eventId:payload.id,eventType:payload.event,checkoutId:id(c?.id),paymentId:id(p?.id),reference:id(c?.externalReference??p?.externalReference),customerId:id(c?.customer??p?.customer)};
